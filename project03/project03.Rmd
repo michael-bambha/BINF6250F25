@@ -31,13 +31,17 @@ reticulate::conda_install(packages=c('pdf2svg',"seqlogo"), forge=TRUE, channel="
 
 
 ```{python}
+from collections import deque
+from statistics import mean
+from itertools import islice
 import numpy as np
-import seqlogo
-
-#import function for building sequence motif & idenfitying seqs matching to motif
 from data_readers import *
 from seq_ops import get_seq
 from motif_ops import *
+
+#import logomaker
+#import pandas as pd
+#import matplotlib.pyplot as plt
 ```
 
 ---
@@ -77,20 +81,116 @@ Probability of chosing position $m = \frac{A_{m}}{\sum_{l}A_{l}}$ for positions 
 
 
 ```{python}
-def GibbsMotifFinder (seqs, k, seed=42):
-    '''
+def score_kmers(seq: str, pwm: np.ndarray, k: int) -> np.ndarray:
+    """Use score_kmer in a sliding window to compute the scores
+    for every valid kmer based on a given pwm and k.
+
+    Args:
+        seq (str): sequence to score
+        pwm (np.ndarray): position weight matrix of motif
+        k (int): k-length of kmer to score
+
+    Returns:
+        np.ndarray: Array of PWM scores based on kmer start position within
+        the sequence
+    """
+    scores = []
+    for i in range(len(seq) - k):
+        score = score_kmer(seq[i : i + k], pwm)
+        scores.append(score)
+    return np.array(scores)
+
+
+def score_to_prob(scores: np.ndarray) -> np.ndarray:
+    """Convert numpy array of PWM scores to
+    an array of probabilities
+
+    Args:
+        scores (np.ndarray): Array of size 4xk with PWM
+        scores of each kmer
+
+    Returns:
+        np.ndarray: Array of size 4xk with probabilities
+    """
+    probs = np.exp2(scores)
+    probs /= probs.sum()
+    return probs
+
+
+def _compare_ic_mean(previous_ic: deque, current_ic: deque) -> float:
+    """Find the difference between the means of two
+    deque structures containing information content
+
+    Args:
+        previous_ic (deque): Deque of information content from previous iteration
+        current_ic (deque): Deque of information content from current iteration
+
+    Returns:
+        float: Absolute value of the mean difference between the two
+        deques
+    """
+    return abs(mean(current_ic) - mean(previous_ic))
+
+
+def check_ic(
+    current_ic: deque, previous_ic: deque, patience: int, break_diff: float
+) -> bool:
+    """Find whether the information content
+
+    Args:
+        current_ic (float): ic from 1 to n
+        previous_ic (deque): ic from 0 to n-1
+        patience (int): # iterations to 
+        break_diff (float): _description_
+
+    Returns:
+        bool: _description_
+    """
+    if _compare_ic_mean(previous_ic, current_ic) < break_diff:
+        return True
+    return False
+
+
+def GibbsMotifFinder(seqs: list[str], k: int, seed: int = 42) -> np.ndarray:
+    """
     Function to find a pfm from a list of strings using a Gibbs sampler
-    
-    Args: 
+
+    Args:
         seqs (str list): a list of sequences, not necessarily in same lengths
         k (int): the length of motif to find
         seed (int, default=42): seed for np.random
 
     Returns:
         pfm (numpy array): dimensions are 4xlength
-        
-    '''
-    pass
+
+    """
+    np.random.seed(seed)
+    n = len(seqs)
+    kmer_starts = np.random.randint(0, len(seqs[0]) - k, size=n)
+    init_motif = [seq[start : start + k] for seq, start in zip(seqs, kmer_starts)]
+    motifs = None
+    for i in range(10000):
+        if not motifs:
+            motifs = init_motif
+        excluded_idx = np.random.randint(0, n)
+        motifs_minus_excluded = motifs[:excluded_idx] + motifs[excluded_idx + 1 :]
+        pfm = build_pfm(motifs_minus_excluded, k)
+        ic = deque(maxlen=11)
+        ic.append(pfm_ic(pfm))
+        if check_ic(
+            list(islice(ic, 1, 11)),
+            list(islice(ic, 0, 10)),
+            patience=200,
+            break_diff=0.1,
+        ):
+            break
+        pwm = build_pwm(pfm)
+        score_distribution = score_kmers(seqs[excluded_idx], pwm, k)
+        probs = score_to_prob(score_distribution)
+        choice = np.random.choice(len(probs), p=probs)
+        motifs[excluded_idx] = seqs[excluded_idx][choice : choice + k]
+
+    return pfm
 ```
 
 
