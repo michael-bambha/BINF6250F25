@@ -1,6 +1,6 @@
 ---
 title: "Project 03"
-author: "Your Name"
+author: "Michael Bambha, Abigail McKinley, Little Butler"
 date: "`r format(Sys.time(), '%Y%m%d')`"
 output:
   github_document:
@@ -32,8 +32,6 @@ reticulate::conda_install(packages=c('pdf2svg',"seqlogo"), forge=TRUE, channel="
 
 ```{python}
 from collections import deque
-from statistics import mean
-from itertools import islice
 import numpy as np
 from data_readers import *
 from seq_ops import get_seq
@@ -117,38 +115,58 @@ def score_to_prob(scores: np.ndarray) -> np.ndarray:
     return probs
 
 
-def _compare_ic_mean(previous_ic: deque, current_ic: deque) -> float:
-    """Find the difference between the means of two
-    deque structures containing information content
+def build_ppm(pfm: np.ndarray) -> np.ndarray:
+    """
+    Build a Position Probability Matrix (PWM) from a Position Frequency Matrix (PFM).
+    Made for convergence check using KL divergence
 
     Args:
-        previous_ic (deque): Deque of information content from previous iteration
-        current_ic (deque): Deque of information content from current iteration
+        pfm (np.ndarray): PFM with dimensions 4 x length.
 
     Returns:
-        float: Absolute value of the mean difference between the two
-        deques
+        np.ndarray: PPM with dimensions 4 x length.
     """
-    return abs(mean(current_ic) - mean(previous_ic))
+    p = 0.25
+    sums = np.sum(pfm, axis=0) + 4 * p
+    ppm = (pfm + p) / sums
+    return ppm
 
 
-def check_ic(
-    current_ic: deque, previous_ic: deque, patience: int, break_diff: float
+def calc_kl_div(ppm_prev: np.ndarray, ppm_curr: np.ndarray) -> float:
+    """Calculate the Kullback-Leibler Divergence between
+    two PPMs
+
+    Args:
+        ppm_prev (np.ndarray): PPM from past iteration
+        ppm_curr (np.ndarray): PPM of current iteration
+
+    Returns:
+        float: KL divergence
+    """
+    ratio = np.sum(ppm_curr * np.log2(ppm_curr / ppm_prev), axis=0)
+    return np.mean(ratio)
+
+
+def check_convergence(
+    kl_div: deque, burn_in: int, tolerance: float, iteration: int
 ) -> bool:
-    """Find whether the information content
+    """Finds if all values in a KL divergence deque are less than a specified tolerance value.
+    Returns True if all values in kl_div < tolerance; False if any kl_div[i] > tolerance,
+    current iteration < burn-in, or len(kl_div) < kl_div.maxlen
 
     Args:
-        current_ic (float): ic from 1 to n
-        previous_ic (deque): ic from 0 to n-1
-        patience (int): # iterations to 
-        break_diff (float): _description_
+        kl_div (deque): Deque of previous n KL divergences
+        burn_in (int): Number of iterations before allowing check
+        tolerance (float): Tolerance for KL divergence
+        iteration (int): Number of current iteration
 
     Returns:
-        bool: _description_
+        bool: Returns True if all values in kl_div < tolerance; False if any kl_div[i] > tolerance,
+    current iteration < burn-in, or len(kl_div) < kl_div.maxlen
     """
-    if _compare_ic_mean(previous_ic, current_ic) < break_diff:
-        return True
-    return False
+    if iteration < burn_in or len(kl_div) < kl_div.maxlen:
+        return False
+    return all(val < tolerance for val in kl_div)
 
 
 def GibbsMotifFinder(seqs: list[str], k: int, seed: int = 42) -> np.ndarray:
@@ -169,20 +187,20 @@ def GibbsMotifFinder(seqs: list[str], k: int, seed: int = 42) -> np.ndarray:
     kmer_starts = np.random.randint(0, len(seqs[0]) - k, size=n)
     init_motif = [seq[start : start + k] for seq, start in zip(seqs, kmer_starts)]
     motifs = None
+    kl_div = deque(maxlen=11)
+    ppm_prev = None
     for i in range(10000):
         if not motifs:
             motifs = init_motif
         excluded_idx = np.random.randint(0, n)
         motifs_minus_excluded = motifs[:excluded_idx] + motifs[excluded_idx + 1 :]
         pfm = build_pfm(motifs_minus_excluded, k)
-        ic = deque(maxlen=11)
-        ic.append(pfm_ic(pfm))
-        if check_ic(
-            list(islice(ic, 1, 11)),
-            list(islice(ic, 0, 10)),
-            patience=200,
-            break_diff=0.1,
-        ):
+        ppm = build_ppm(pfm)
+        if ppm_prev is not None:
+            kl = calc_kl_div(ppm_prev, ppm)
+            kl_div.append(kl)
+        ppm_prev = ppm.copy()
+        if check_convergence(kl_div, burn_in=2000, tolerance=1e-6, iteration=i) is True:
             break
         pwm = build_pwm(pfm)
         score_distribution = score_kmers(seqs[excluded_idx], pwm, k)
@@ -193,22 +211,19 @@ def GibbsMotifFinder(seqs: list[str], k: int, seed: int = 42) -> np.ndarray:
     return pfm
 ```
 
-
 ```{python}
-# Here we test your Gibbs sampler.
-# You do not need to edit this or the section below. This is the Driver program
+seq_file = "data/GCF_000009045.1_ASM904v1_genomic.fna"
+gff_file = "data/GCF_000009045.1_ASM904v1_genomic.gff"
 
-#read promoters, store in a list of strings
-seq_file="data/GCF_000009045.1_ASM904v1_genomic.fna.gz"
-gff_file="data/GCF_000009045.1_ASM904v1_genomic.gff.gz"
+promotor_seqs = []
 
-seqs = []
+for name, seq in get_fasta(seq_file):  # For each entry in our FASTA file
+    for gff_entry in get_gff(gff_file):  # For each entry in our GFF file
+        if gff_entry.type == "CDS":  # If this is a coding sequence
+            promoter_seq = get_seq(
+                seq, gff_entry.start, gff_entry.end, gff_entry.strand, 50
+            )  # Extract 50 bp as a promoter
 
-for name, seq in get_fasta(seq_file): # For each entry in our FASTA file
-    for gff_entry in get_gff(gff_file): # For each entry in our GFF file
-        if gff_entry.type == 'CDS': # If this is a coding sequence
-            promoter_seq = get_seq(seq, gff_entry.start, gff_entry.end, gff_entry.strand, 50) # Extract 50 bp as a promoter
-    
             """
             Because the gibbs sampling assumption is broken in just using promoters,
             and because it takes very long time to randomly progress through so many
@@ -216,14 +231,14 @@ for name, seq in get_fasta(seq_file): # For each entry in our FASTA file
             part of the shine-dalgarno motif:
             """
             if "AGGAGG" in promoter_seq:
-                seqs.append(promoter_seq)
-```
+                promotor_seqs.append(promoter_seq)
 
-
-```{python}
-# Run the gibbs sampler:
-promoter_pfm = GibbsMotifFinder(seqs,10)
-
-# Plot the final pfm that is generated: 
-seqlogo.seqlogo(seqlogo.CompletePm(pfm = promoter_pfm.T))
+promoter_pfm = GibbsMotifFinder(promotor_seqs, 10)
+# pfm = pd.DataFrame(promoter_pfm.T, columns=["A", "C", "G", "T"])
+print(pfm)
+# was having issues w/ seqlogo dependencies so was checking w/ logomaker
+# logomaker uses matplotlib and needs a pandas dataframe
+# logomaker.Logo(pfm, color_scheme="classic") 
+# plt.show()
+# seqlogo.seqlogo(seqlogo.CompletePm(pfm=promoter_pfm.T))
 ```
