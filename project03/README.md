@@ -143,7 +143,7 @@ FUNCTION measure_information_content(Motifs, k):
 We were able to successfully implement the Gibbs sampler, and we learned a lot more about numpy usage,
 vectorization, and KL divergence for measuring our convergence.
 
-![]('figures/Shine_Delgarno.png')
+![](figures/Shine_Delgarno.png)
 
 ## Challenges
 One of the biggest issues was the convergence check implementation. Originally, we looked at information content across 10 iterations and measured the absolute mean difference, but the IC wasn't changing enough to be a meaningful check. It could have just been an implementation mistake on our part, but setting the mean difference to 1e^-8 seemed to not be a great measure for convergence. Instead, we used Kullbach-Liebler divergence, which hopefully is an appropriate measure for this task. Still, finding an appropriate threshold to consider the model "converged" is somewhat arbitrary and very experimental, so that was another challenge. 
