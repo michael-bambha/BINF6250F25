@@ -1,5 +1,8 @@
 ## Project 3: Gibbs Sampling
 
+## Introduction
+The aim of this project was to create a Gibbs sampler that identifies DNA sequence motifs. The end goal was to produce a sequence logo that shows the conserved bases, as well as a position frequency matrix. Through this project, we learned that Gibbs sampling allows for us to determine where motifs are located in a sequence through an algorithmic approach, which is much more effective than alternative approaches. 
+
 ## Pseudocode
 
 ```
@@ -149,8 +152,10 @@ vectorization, and KL divergence for measuring our convergence.
 One of the biggest issues was the convergence check implementation. Originally, we looked at information content across 10 iterations and measured the absolute mean difference, but the IC wasn't changing enough to be a meaningful check. It could have just been an implementation mistake on our part, but setting the mean difference to 1e^-8 seemed to not be a great measure for convergence. Instead, we used Kullbach-Liebler divergence, which hopefully is an appropriate measure for this task. Still, finding an appropriate threshold to consider the model "converged" is somewhat arbitrary and very experimental, so that was another challenge. 
 
 
-### Comments from Group Leader
+### Comments from Group Leader - Michael
 
 While the Gibbs' algorithm is fairly straightforward, trying to determine convergence is a challenge. I had to do a lot of outside research on how we consider models "converged" mathematically, and that took me into some rabbit holes aside from information content alone. I found a couple of additional ways to measure convergence, including heuristics like Hamming distance, but ultimately settled on KL as it was pretty easy to implement. 
 
 ### Comments from Other Members
+## Abi
+In the original program I wrote, my sampler was getting "stuck" in the convergence loop, as I had forgotten to write a function that would stop after an appropriate number of intervals. Looking through the code that Michael had written was very beneficial, and helped me understand what I was doing incorrectly, as well as gave me ideas of how to code more efficiently. I also had to do some research about how we could tell when the model was properly converged, which I still do not fully understand, but I believe the threshold makes sense for our purpose. 
