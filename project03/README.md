@@ -159,3 +159,7 @@ While the Gibbs' algorithm is fairly straightforward, trying to determine conver
 ### Comments from Other Members
 ## Abi
 In the original program I wrote, my sampler was getting "stuck" in the convergence loop, as I had forgotten to write a function that would stop after an appropriate number of intervals. Looking through the code that Michael had written was very beneficial, and helped me understand what I was doing incorrectly, as well as gave me ideas of how to code more efficiently. I also had to do some research about how we could tell when the model was properly converged, which I still do not fully understand, but I believe the threshold makes sense for our purpose. 
+
+### Comments from Group Members
+## Little
+This assignment was challenging to me since I had to get the idea of Gibbs Sampling. My group leader was able to provide resourves for me to understand. I did not submit or provide as I wanted to in this project. The resources the professor later uploaded aslo gave me a better understanding on how tot ackle this. I did not get any code i performed on my end to work.
