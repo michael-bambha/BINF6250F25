@@ -119,6 +119,14 @@ class DeBruijnGraph:
         edges_str = "\n  ".join(edges)
         return f"<DeBruijnGraph: {len(self.graph)} nodes>\n  {edges_str}"
 
+    @property
+    def num_nodes(self):
+        return len(self.graph)
+    
+    @property
+    def num_edges(self):
+        return sum(c.values() for c in self.graph.values())
+
     def add_edge(self, left, right):
         """This function adds a new edge to the graph
 
