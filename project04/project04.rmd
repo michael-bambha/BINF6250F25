@@ -117,6 +117,18 @@ class DeBruijnGraph:
         edges_str = "\n  ".join(edges)
         return f"<DeBruijnGraph: {len(self.graph)} nodes>\n  {edges_str}"
 
+    def _delete_cache(self):
+        """
+        Some properties of the class are cached with the cached_property decorator.
+        Since we can add and remove edges from our graph, cached results will
+        no longer be valid if we mutated the graph and need to be recomputed.
+        functools cached_property stores these in __dict__ so we need to manually
+        delete them.
+        """
+        for cache in ["in_and_out_degrees", "has_eulerian_circuit", "has_eulerian_path"]
+            if cache in self.__dict__:
+                del self.__dict__[cache]
+
     @property
     def num_nodes(self):
         return len(self.graph)
@@ -220,6 +232,7 @@ class DeBruijnGraph:
         Updates graph attribute to add right to the list named left in defaultdict
         """
         self.graph[left].update([right])
+        self._delete_cache()
 
     def remove_edge(self, left, right):
         """This function removes an edge from the graph
@@ -236,6 +249,7 @@ class DeBruijnGraph:
             del self.graph[left][right]
         if not self.graph[left]:
             del self.graph[left]
+        self._delete_cache()
 
     def build_debruijn_graph(self, input_string, k):
         """This function builds a De Buijn graph from a string
