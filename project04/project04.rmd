@@ -92,11 +92,9 @@ For node:
 ```
 
 ```{python}
-from collections import defaultdict
-import random
-
 from collections import defaultdict, Counter
 import random
+from functools import cached_property
 
 
 class DeBruijnGraph:
@@ -126,6 +124,91 @@ class DeBruijnGraph:
     @property
     def num_edges(self):
         return sum(c.values() for c in self.graph.values())
+
+    @property
+    def has_eulerian_circuit(self) -> bool:
+        """Check if the graph has a valid Eulerian circuit by
+        seeing if all in-degree == out-degree for all nodes
+
+        Returns:
+            bool: True if an Eulerian circuit exists for the graph,
+            else False
+        """
+        out_degrees, in_degrees = self.in_and_out_degrees
+        if all(i == j for i, j in zip(out_degrees.values(), in_degrees.values())):
+            return True
+        return False
+
+    @property
+    def has_eulerian_path(self) -> bool:
+        """Finds if the graph has an Eulerian path.
+        If an Eulerian circuit exists, this will return True.
+        Finds if there is only 1 node for which out_degree - in_degree = 1
+        and only 1 node for in_degree - out_degree = 1. 
+        Returns:
+            bool: True if an Eulerian path exists for the graph,
+            else False.
+        """
+        if self.has_eulerian_circuit:
+            return True
+        in_degrees, out_degrees = self.in_and_out_degrees
+        start_nodes = 0
+        end_nodes = 0
+        for in_degree, out_degree in zip(in_degrees.values(), out_degrees.values()):
+            diff = out_degree - in_degree
+            if diff not in (-1, 0, 1):
+                return False
+            if diff == 1:
+                start_nodes += 1
+            elif diff == -1:
+                end_nodes += 1
+            if start_nodes > 1 or end_nodes > 1:
+                return False
+        return start_nodes == 1 and end_nodes == 1
+
+    def calc_out_degree(self, node: Counter) -> int:
+        """Find the out degree for a particular node
+
+        Args:
+            node (Counter): Node to calculate its degree
+
+        Returns:
+            int: Out degree of specified node
+        """
+        return sum(self.graph[node].values())
+    
+    def calc_in_degree(self, node: Counter) -> int:
+        """Find the in-degree of a node from the graph
+
+        Args:
+            node (Counter): Node to calculate in-degree
+
+        Returns:
+            int: in-degree of the node
+        """
+        in_degree = 0
+        for _, right in self.graph.items():
+            in_degree += right.get(node, 0)
+        return in_degree
+    
+    # cached property will store the return value after calculating it once
+    # just so that we don't need to recalculate if we check both circuit and path.
+
+    @cached_property
+    def in_and_out_degrees(self) -> tuple[dict[str, int], dict[str, int]]:
+        """Calculate the in and out degrees for all nodes in the graph
+
+        Returns:
+            tuple[dict[int], dict[int]]: Tuple of dictionaries as
+            (node: out_degree, node: in_degree)
+        """
+        out_degrees = {}
+        in_degrees = {}
+        for node in self.graph.keys():
+            out_degrees[node] = (self.calc_out_degree(node))
+            in_degrees[node] = (self.calc_in_degree(node))
+        
+        return out_degrees, in_degrees
 
     def add_edge(self, left, right):
         """This function adds a new edge to the graph
