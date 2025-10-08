@@ -1,4 +1,4 @@
-# Project 04: Functional file parsing
+# Project 04: Sequence Assembly
 Michael Bambha and Brooks Groharing
 
 # Introduction
