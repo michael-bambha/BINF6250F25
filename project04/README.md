@@ -1,4 +1,4 @@
-# BINF6250F25
+# BINF6250F25 Project 04
 
 ## Pseudocode
 
