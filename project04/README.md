@@ -1,4 +1,8 @@
-# BINF6250F25 Project 04
+# Project 04: Functional file parsing
+Michael Bambha and Brooks Groharing
+
+# Introduction
+In this project, we implemented functions to assemble De Bruijn graphs from input data and re-assemble these into valid eulerian paths.
 
 ## Pseudocode
 
@@ -87,3 +91,15 @@ if that would be ideal to do or not.
 Lastly, I understood the algorithm much better without doing it recursively, but the functions provided were 
 intended for a recursive approach. I rarely use recursion so it's probably more so that I'm not used to it, but it
 was good practice.
+
+### Contributor - Brooks
+
+As Michael notes, implementing the De Bruijn graph constructor was very straightforward--I think we designed and wrote it basically on the spot. Implementing the Eulerian walk functions using the methods suggested in the provided file proved more time consuming. 
+
+For one thing, recursion is inherently a bit tricky to conceptualize and debug. Truthfully, our initial pseudocode wasn't quite fit for the task, and it took some trial and error to figure out the correct return cases.
+
+I also struggled a bit with how best to store and interact with the graph during the recursive walk, since the assignment directed us to remove edges as they were traversed. After some deliberation I decided to just save a single copy of the graph before attempting a walk, modifying the De Bruijn object's copy while traversing it, and then restoring the stored graph using the unedited copy after. I don't love this as a solution, but it is at least simpler (and required less modifications to the provided function arguments) than, for example, passing a modified copy of the graph into every recursive function call.
+
+## Generative AI Appendix
+
+We did not use generative AI in this project.
