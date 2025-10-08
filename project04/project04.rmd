@@ -13,6 +13,7 @@ output:
 knitr::opts_chunk$set(echo=TRUE)
 library('reticulate')
 reticulate::use_condaenv(condaenv = "r-reticulate")
+
 ```
 
 You will be implementing one of the primary assembly algorithms from short-read data that is used today. We will implement a simple form of the algorithm where we _assume perfect sequencing_. That is, everything is sequenced exactly once and there are no errors or variants in the sequencing. 
@@ -106,7 +107,8 @@ class DeBruijnGraph:
     """
 
     def __init__(self, input_string, k):
-        self.graph = defaultdict(Counter)
+        # self.graph = defaultdict(Counter)
+        self.graph = defaultdict(list)
         self.first_node = ""
         self.build_debruijn_graph(input_string, k)
 
@@ -247,9 +249,9 @@ class DeBruijnGraph:
 
         Updates graph attribute to add right to the list named left in defaultdict
         """
-        self.graph[left].update([right])
-        self._delete_cache()
-
+        
+        self.graph[left].append(right)
+        
     def remove_edge(self, left, right):
         """This function removes an edge from the graph
 
@@ -259,13 +261,13 @@ class DeBruijnGraph:
 
         Updates graph attribute to remove right from the list named left in defaultdict
         """
-        if self.graph[left][right] > 1:
-            self.graph[left][right] -= 1
-        else:
-            del self.graph[left][right]
-        if not self.graph[left]:
-            del self.graph[left]
-        self._delete_cache()
+        # Remove the edge
+        self.graph[left].remove(right)
+        
+        # If the start point has no outgoing edges,
+        # delete it.
+        if len(self.graph[left]) == 0:
+          del self.graph[left]
 
     def build_debruijn_graph(self, input_string, k):
         """This function builds a De Buijn graph from a string
@@ -300,9 +302,26 @@ class DeBruijnGraph:
         >>> dbg.print_eulerian_walk(seed=1) #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
         ['thi', ...]
         """
-        pass
+        for node in list(self.graph.keys()):
+          
+          # Save an unmodified copy of our graph.
+          untraversed = self.graph.copy()
+          
+          # Attempt to trace an eulerian path from node
+          #   removing traversed edges from self.graph as we go.
+          walk = self.eulerian_walk(node = node, tour = [])
+          
+          # Restore the modified graph
+          self.graph = untraversed.copy()
+          
+          # If we found an eulerian path, break out and return it
+          if walk:
+            return walk
+        
+        # If no Eulerian path was found, return False
+        return False
 
-    def eulerian_walk(self, node, seed=None):
+    def eulerian_walk(self, node, tour, seed=None):
         """This is a recursive function that follows all edges from a node
         to traverse the graph
 
@@ -319,16 +338,47 @@ class DeBruijnGraph:
         >>> dbg.eulerian_walk('thi', seed=1) #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
         ['est', ...]
         """
-        start = random.randint(0, len(self.graph))
-    
+        
+        # Mark the current node as visited.
+        tour.append(node)
+        
+        # If we have outgoing edges, pick a random edge to traverse.
+        if node in self.graph.keys():
+          new_node = random.choice(self.graph[node])
+          
+          # Remove the edge from graph
+          self.remove_edge(node, new_node)
+          
+          # Recurse to consider the next connected edge.
+          return self.eulerian_walk(new_node, tour)
+        
+        # If we have no outgoing edges, check if the tour is complete.
+        else:
+          # All edges have been covered; return the path
+          if len(self.graph.keys()) == 0:
+            return tour
+          
+          # Otherwise, we've hit a dead end; return false.
+          else:
+            return False
+```
+
+
+```{python}
+# Test 1
+dbg = DeBruijnGraph("this this this is a test", 4)
+dbg_walk = dbg.print_eulerian_walk()
+print(dbg_walk)
+
 ```
 
 ```{python}
 # | eval: false
 graph = DeBruijnGraph("fool me once shame on shame on you fool me", 6)
-print(graph.graph)
 walk = graph.print_eulerian_walk(seed=4)
 walk[0] + "".join(map(lambda x: x[-1], walk[1:]))
+print(walk)
+
 ```
 
 Expected output:
