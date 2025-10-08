@@ -2,7 +2,7 @@
 
 ## Pseudocode
 
-For building the graph:
+To build the graph:
 
 - Slide in a window to map k-1-mer prefixes to suffixes. Create an adjacency list from each prefix node.
 - For adding an edge we simply append to the list. Removing a node, we will remove the instance from the list.
@@ -10,10 +10,37 @@ For building the graph:
 
 
 For traversing:
+```{Python}
+# Outer function to initiate recursive search
+def print_eulerian_walk():
+	for left_node in graph edges:
+		save a copy of graph
+		walk = eulerian_walk(left_node) # removes edges from graph
+		restore graph to copy
 
-Can do this either with recursion or with a stack.
+		if walk != False, return it
+	
+	return False # default condition; no eulerian walks found.
 
-With the stack:
+
+# Inner recursive function
+eulerian_walk(current_node, toured_nodes):
+	add current_node to toured_nodes
+
+	if node has outgoing edges:
+		pick a random connected next_node
+		remove edge from current_node to next_node from graph
+		return eulerian_walk(current_node = next_node, toured_nodes)
+	else:
+		if graph has no remaining edges:
+			return tour
+		else:
+			return False # we've hit a dead end
+```
+
+### Another possibility
+Note that instead of true recursion, we could instead trace paths using a stack:
+```
 - Initialize stack to the valid starting node
 - While the stack is non empty:
 - If the chosen node has untraversed edges:
@@ -22,10 +49,12 @@ With the stack:
 - Else:
 - Pop the node from the stack and append to tour list
 
+```
 The only thing that we might have to consider is that some graphs may not have a Eulerian circuit.
 We could implement finding if the path/circuit exist, which we were told we could ignore for simplicity,
 but if we ignore it and a circuit does not exist, we will get stuck by not choosing the correct
 starting node.
+
 
 ## Successes
 
