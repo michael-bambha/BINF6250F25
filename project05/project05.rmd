@@ -105,6 +105,7 @@ Test your implementation with various input sequences and scoring parameters
 
 ```{python}
 import numpy as np
+from enum import Enum
 ```
 
 ---
@@ -126,8 +127,6 @@ SmithWaterman(seq1, seq2, match, mismatch, gap)
 ```
 
 ```{python}
-from enum import Enum
-
 class Direction(Enum):
     END = 0 
     DIAG = 1
@@ -165,21 +164,10 @@ def cal_score(matrix, seq1, seq2, i, j, match, mismatch, gap):
     left_score = matrix[left_neighbor] + gap_score
     diag_score = matrix[diag_neighbor] + (match_score if seq1[i-1] == seq2[j-1] else mismatch_score)
 
-    score_dict = {Direction.UP: up_score, Direction.LEFT: left_score, Direction.DIAG: diag_score}
+    score_dict = {Direction.UP: up_score, Direction.LEFT: left_score, Direction.DIAG: diag_score, Direction.END: 0}
     max_direction, max_score = max(score_dict.items(), key=lambda score: score[1])
 
-
-    match max_direction:
-        case Direction.DIAG:
-            return max_score, Direction.DIAG
-        case Direction.UP:
-            return max_score, Direction.UP
-        case Direction.LEFT:
-            return max_score, Direction.LEFT
-        case _:
-            return max_score, Direction.END
-
-    raise 
+    return max_direction, max_score
     
 ```
 
@@ -259,4 +247,5 @@ ACATTA
  [0 0 0 0 0 2 3 2 1]
  [0 0 1 0 1 1 2 4 3]
  [0 0 0 0 0 0 1 3 3]]
+
 
