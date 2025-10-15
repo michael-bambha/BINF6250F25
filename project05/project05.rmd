@@ -127,13 +127,13 @@ SmithWaterman(seq1, seq2, match, mismatch, gap)
 ```
 
 ```{python}
+
 class Direction(Enum):
-"""Enum for our traceback directions. This is simply to make the logic
-more readable"""
-    END = 0 
-    DIAG = 1
-    UP = 2
-    LEFT = 3
+  ''' Enum for our traceback directions. This is simply to make the logic more readable '''
+  END = 0 
+  DIAG = 1
+  UP = 2
+  LEFT = 3
     
 def cal_score(matrix: np.ndarray, seq1: str, seq2: str, i: int, j: int, match: int, mismatch: int, gap: int) -> tuple[int, Direction]:
     '''Calculate score for position (i,j) in scoring matrix, also record move to trace back
@@ -163,9 +163,9 @@ def cal_score(matrix: np.ndarray, seq1: str, seq2: str, i: int, j: int, match: i
     diag_neighbor = (i-1, j-1)
     left_neighbor = (i, j-1)
 
-    up_score = matrix[up_neighbor] + gap_score
-    left_score = matrix[left_neighbor] + gap_score
-    diag_score = matrix[diag_neighbor] + (match_score if seq1[i-1] == seq2[j-1] else mismatch_score)
+    up_score = matrix[up_neighbor] + gap
+    left_score = matrix[left_neighbor] + gap
+    diag_score = matrix[diag_neighbor] + (match if seq1[i-1] == seq2[j-1] else mismatch)
 
     score_dict = {Direction.UP: up_score, Direction.LEFT: left_score, Direction.DIAG: diag_score, Direction.END: 0}
     max_direction, max_score = max(score_dict.items(), key=lambda score: score[1])
@@ -177,7 +177,9 @@ def cal_score(matrix: np.ndarray, seq1: str, seq2: str, i: int, j: int, match: i
 ```{python}
 import numpy as np
 
-def traceback(seq1: str, seq2: str, traceback_matrix: np.ndarray, maximum_position: int:
+maximum_position = 0
+
+def traceback(seq1: str, seq2: str, traceback_matrix: np.ndarray, maximum_position: int):
     '''Find the optimal path through scoring marix
         
         diagonal: match/mismatch
@@ -208,56 +210,68 @@ def traceback(seq1: str, seq2: str, traceback_matrix: np.ndarray, maximum_positi
     aligned_seq1 = ""
     aligned_seq2 = ""
     
-    maximum_value = np.max(traceback_matrix)
-    maximum_position = np.argmax(traceback_matrix)
-    current_row,current_col = np.unravel_index(maximum_postion, matrix.shape)
-    print(row,column)
+    #maximum_value = np.max(traceback_matrix)
+    #maximum_position = int(np.argmax(maximum_value))
     
-    while current_move != END:
+    current_row,current_col = np.unravel_index(maximum_position, traceback_matrix.shape)
+    print(current_row,current_col)
     current_move = traceback_matrix[current_row][current_col]
-    neighbors_list = []
     
-      for (x,y) in [( current_row - 1, current_col), (current_row, current_col - 1), 
-      (current_row - 1, current_col - 1)]:
-        neighbors_list.append(traceback_matrix[x,y])
+    while current_move != Direction.END:
+      current_move = traceback_matrix[current_row][current_col]
+      if current_move == Direction.DIAG:
+        aligned_seq1 += seq1[current_row - 1]
+        aligned_seq2 += seq2[current_col - 1]
+        current_row, current_col = current_row -1, current_col - 1
         
-      up_value = traceback_matrix[current_row - 1, current_col].append(neighbors_list)
-      left_value = traceback_matrix[current_row, current_col - 1].append(neighbors_list)
-      diag_value = traceback_matrix[current_row - 1, current_col - 1].append(neighbors_list)
-      get_max_neighbor = max(neighbors_list)
-        if get_max_neighbor == up_value:
-          current_row,current_col = current_row - 1, current_col
-        if get_max_neighbor == left_value:
-          current_row,current_col = current_row, current_col - 1
-        if get_max_neighbor == diag_value:
-          current_row, current_col = current_row -1, current_col - 1
+      elif current_move == Direction.UP:
+        aligned_seq1 += seq1[current_row - 1]
+        aligned_seq2 += "-"
+        current_row, current_col = current_row - 1, current_col
+        
+      elif current_move == Direction.LEFT:
+        aligned_seq1 += "-"
+        aligned_seq2 += seq2[current_col - 1]
+        current_row, current_col = current_row, current_col -1
       
-     aligned_seq1 += seq1[current_row]
-        aligned_seq2 += seq2[current_col]
-        current_row, current_col -= 1
+      elif current_move == Direction.END:
+        break
+            
+      current_move = traceback_matrix[current_row][current_col]
+    return aligned_seq1,aligned_seq2
+            
+            
         
-    aligned_seq1 += "-"
-    aligned_seq2 += seq2[current_col]
-    pass
             
 ```
 
 ```{python}
-def smith_waterman(seq1: str, seq2: str, match: int = 1, mismatch: int = -1, gap: int = =-1) -> tuple[str, str, np.ndarray]:
-    '''Smith-Waterman algorithm for local alignment
-    
-    Args:
-        seq1 (str): input seq 1
-        seq2 (str): input seq 2
-        match: default = +1
-        mismatch: default = -1
-        gap: default = -1
-    
-    Returns:
-        aligned_seq1 (str)
-        aligned_seq2 (str)
-        score_matrix (numpy array): scoring matrix
-    '''
+def smith_waterman(seq1: str, seq2: str, match: int = 1, mismatch: int = -1, gap: int =-1) -> tuple[str, str, np.ndarray]:
+        '''Smith-Waterman algorithm for local alignment
+        
+        Args:
+            seq1 (str): input seq 1
+            seq2 (str): input seq 2
+            match: default = +1
+            mismatch: default = -1
+            gap: default = -1
+        
+        Returns:
+            aligned_seq1 (str)
+            aligned_seq2 (str)
+            score_matrix (numpy array): scoring matrix
+        '''
+        score_matrix = np.zeros((len(seq1)+1, len(seq2)+1), dtype=int)
+        for i in range(len(seq1) + 1):
+          for j in range(len(seq2) + 1):
+            max_direction, max_score = cal_score(score_matrix, seq1, seq2, i, j, match, mismatch, gap)
+            score_matrix[i,j]=max_score
+        
+        maximum_position = np.argmax(score_matrix)
+        aligned_seq1, aligned_seq2 = traceback(seq1, seq2, score_matrix, maximum_position)
+        return aligned_seq1, aligned_seq2, score_matrix
+  
+
 
 ```
 
