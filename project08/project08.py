@@ -24,15 +24,35 @@ EMIT_PROBS = {
 
 
 def viterbi(observation: str):
+    states = list(INIT_PROBS.keys())
     num_states = len(INIT_PROBS.keys())
     obs_len = len(observation)
-    prob_matrix = pd.DataFrame(np.zeros((num_states, obs_len)))
-    prob_matrix.index = INIT_PROBS.keys()
-    prob_matrix.columns = [char for char in observation]
-    traceback = {"States": [], "Probabilities": []}
-    for i in range(len(observation)):
-        prob_matrix, traceback = calc_probs(i, observation, prob_matrix, traceback)
-    return prob_matrix, traceback
+
+    prob_matrix = pd.DataFrame(np.zeros((num_states, obs_len)), index=states)
+    traceback = pd.DataFrame(None, index=states, columns=range(obs_len))
+
+    # update first observation w/ initial probs
+    first_obs = observation[0]
+    for k in states:
+        prob_matrix.loc[k, 0] = INIT_PROBS[k] * EMIT_PROBS[k][first_obs]
+        traceback.loc[k, 0] = None
+
+    # 'recursion' -- all other up to the end
+    for j in range(1, obs_len):
+        obs = observation[j]
+        for k in states:
+            max_prob = -1.0
+            best_state = None
+
+            for i in states: # this maybe could be vectorized?
+                prob = prob_matrix.loc[i, j-1] * TRANS_PROBS[i][k]
+
+                if prob > max_prob:
+                    max_prob = prob
+                    best_state = i
+
+            prob_matrix.loc[k, j] = EMIT_PROBS[k][obs] * max_prob
+            traceback.loc[k, j] = best_state
 
 
 def calc_probs(j, observation, prob_matrix, traceback):
@@ -82,10 +102,3 @@ def choose_max(prob_dict, k=None):
     return max(prob_dict[k].items(), key=lambda x: x[1])
 
 
-# df = (viterbi("ACGCGATC")[0])
-# df.to_csv("something.csv")
-
-
-for idx, k in enumerate(TRANS_PROBS):
-    print(idx)
-    print(k)
