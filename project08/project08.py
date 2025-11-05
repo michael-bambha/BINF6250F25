@@ -75,8 +75,3 @@ def calc_probs(states, observation, obs_len, prob_df, traceback_array):
         max_state = prob_df.index[prob_df[j] == maximum][0]  
         # log state in traceback array
         traceback_array[j] = max_state
-        
-        return max(prob_dict.items(), key=lambda x: x[1])
-    return max(prob_dict[k].items(), key=lambda x: x[1])
-
-
