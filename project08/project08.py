@@ -3,7 +3,6 @@ File: project08.py
 Description: BINF6250 project 8
 Authors: Michael Bambha and Jason Bae
 """
-from collections import defaultdict
 import numpy as np
 import pandas as pd
 
@@ -28,76 +27,55 @@ def viterbi(observation: str):
     num_states = len(INIT_PROBS.keys())
     obs_len = len(observation)
 
-    prob_matrix = pd.DataFrame(np.zeros((num_states, obs_len)), index=states)
-    traceback = pd.DataFrame(None, index=states, columns=range(obs_len))
+    # Establish probability matrix as a dataframe, with the possible states as rows
+    # and the emission indices as the columns.
+    prob_df = pd.DataFrame(np.zeros((num_states, obs_len)), index=states)
+    
+    # Traceback array set to be empty, we will record the state with the highest 
+    # probability for each emission.
+    traceback_array = np.empty(obs_len, dtype=str)
 
-    # update first observation w/ initial probs
-    first_obs = observation[0]
-    for k in states:
-        prob_matrix.loc[k, 0] = INIT_PROBS[k] * EMIT_PROBS[k][first_obs]
-        traceback.loc[k, 0] = None
+    # Fill out probability matrix and traceback array
+    calc_probs(states, observation, obs_len, prob_df, traceback_array)
+    
+    return prob_df, traceback_array
 
+def calc_probs(states, observation, obs_len, prob_df, traceback_array):
+    """
+    Function to calculate the probabilities of each state-emission combination and
+    record which is most probable in a traceback array. 
+    """
     # 'recursion' -- all other up to the end
-    for j in range(1, obs_len):
-        obs = observation[j]
-        for k in states:
-            max_prob = -1.0
-            best_state = None
-
-            for i in states: # this maybe could be vectorized?
-                prob = prob_matrix.loc[i, j-1] * TRANS_PROBS[i][k]
-
-                if prob > max_prob:
-                    max_prob = prob
-                    best_state = i
-
-            prob_matrix.loc[k, j] = EMIT_PROBS[k][obs] * max_prob
-            traceback.loc[k, j] = best_state
-
-
-def calc_probs(j, observation, prob_matrix, traceback):
-    observed_emission = observation[j]
-
-    traceback_prob = 0
-    traceback_state = ""
-
-    if j == 0:
-        prob_calcs = defaultdict(float)
-        for idx, k in enumerate(INIT_PROBS):
-            state_prob = INIT_PROBS[k] * EMIT_PROBS[k][observed_emission]
-            prob_calcs[k] = state_prob
-            prob_matrix.iloc[idx, j] = prob_calcs[k]
-            max_state, max_prob = choose_max(INIT_PROBS, k=None)
-            if state_prob > traceback_prob:
-                traceback_prob = state_prob
-                traceback_state = max_state
-
-        traceback["States"].append(traceback_state)
-        traceback["Probabilities"].append(traceback_prob)
-        return prob_matrix, traceback
-
-
-
-    for idx, k in enumerate(TRANS_PROBS):
-        prob_calcs = defaultdict(defaultdict)
-        previous_calc = prob_matrix.iloc[idx, j-1]
-        max_state, max_prob = choose_max(TRANS_PROBS, k)
-        state_prob = max_prob * previous_calc * EMIT_PROBS[k][observed_emission]
-        prob_calcs[k][max_state] = state_prob
-        prob_matrix.iloc[idx, j] = prob_calcs[k][max_state]
-
-        if state_prob > traceback_prob:
-            traceback_prob = state_prob
-            traceback_state = max_state
-
-    traceback["States"].append(traceback_state)
-    traceback["Probabilities"].append(traceback_prob)
-
-    return prob_matrix, traceback
-
-
-def choose_max(prob_dict, k=None):
-    if not k:
+    for j in range(0, obs_len):
+        max_prob = -1.0
+        # cannot access previous state (start)
+        if j == 0:
+            # beginning state is the state with the biggest probability
+            start_state = max(INIT_PROBS, key=INIT_PROBS.get)
+            # update first observation w/ initial probs
+            for k in states:
+                prob_df.loc[k, j] = INIT_PROBS[k] * EMIT_PROBS[k][observation[j]]
+        
+        else:
+            for k in states: # rows in probability dataframe
+                for i in states: # transitions in each row
+                    prob = prob_df.loc[i, j-1] * TRANS_PROBS[i][k]
+    
+                    if prob > max_prob:
+                        max_prob = prob
+                        best_state = i
+    
+                # Emission probability multiplication is constant, can do once per state.
+                prob_df.loc[k, j] = EMIT_PROBS[k][observation[j]] * max_prob
+                max_prob = -1.0 # reset max_prob for next row
+        
+        # find max within column
+        maximum = prob_df[j].max() 
+        # find state the max is found in
+        max_state = prob_df.index[prob_df[j] == maximum][0]  
+        # log state in traceback array
+        traceback_array[j] = max_state
+        
         return max(prob_dict.items(), key=lambda x: x[1])
     return max(prob_dict[k].items(), key=lambda x: x[1])
 
