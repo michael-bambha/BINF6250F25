@@ -38,10 +38,26 @@ class HiddenMarkovModel:
             for s in self.states
         ])
 
-        # allow for both log space and prob space
-        self.mul = np.add if use_log_space else np.multiply
-        self.add = np.logaddexp if use_log_space else np.add
+        if use_log_space:
+            self.add = lambda *args: np.logaddexp(*args) if len(args) > 1 else np.logaddexp.reduce(args[0])
+        else:
+            self.add = lambda *args: np.add(*args) if len(args) > 1 else np.sum(args[0])
         self.zero = -np.inf if use_log_space else 0.0
+        self.mul = np.add if use_log_space else np.multiply
+
+    def sum_states(self, matrix: np.ndarray, prev: np.ndarray) -> np.ndarray:
+        """
+        In the forward and backward algorithms, we need different math operations
+        for summing over states when in log space or probability space. We
+        take the dot product of A @ B in prob space, while we need to use
+        logaddexp.reduce for log space.
+        :param matrix: matrix A
+        :param prev: matrix B
+        :return: A @ B if in probability space,
+        """
+        if getattr(self, "use_log_space", False):
+            return np.logaddexp.reduce(matrix.T + prev[:, None], axis=0)
+        return matrix.T @ prev
 
     def viterbi(self, observation: str) -> tuple[np.ndarray, list[str]]:
         """
@@ -90,6 +106,57 @@ class HiddenMarkovModel:
 
         return viterbi, best_path
 
+    def forward(self, observation) -> tuple[float, np.ndarray]:
+        """
+        Find the probability of seeing an observation given the model
+        through the forward algorithm
+        :param observation: Observation (sequence)
+        :return: Tuple of the probability of seeing the observation and
+        the final matrix
+        """
+        obs_len = len(observation)
+        num_states = len(self.states)
+        obs_indices = np.array([self.sym_idx[symbol] for symbol in observation])
+        fwd = np.full((num_states, obs_len), self.zero)
+        # initialization step is identical to viterbi
+        fwd[:, 0] = self.mul(self.init_probs, self.emit_probs[:, obs_indices[0]])
+
+        for t in range(1, obs_len):
+            summed = self.sum_states(self.trans_probs, fwd[:, t - 1])
+            fwd[:, t] = self.mul(self.emit_probs[:, obs_indices[t]], summed)
+
+        tot_prob = self.add(fwd[:, -1])
+        return tot_prob, fwd
+
+    def backward(self, observation):
+        """
+        Find the probability of seeing an observation given the model
+        through the backward algorithm
+        :param observation: observation (sequence)
+        :return: Tuple of the probability of seeing the observation and
+        the final matrix
+        """
+        obs_len = len(observation)
+        num_states = len(self.states)
+        obs_indices = np.array([self.sym_idx[symbol] for symbol in observation])
+        bwd = np.full((num_states, obs_len), self.zero)
+
+        bwd[:, -1] = 0.0 if self.use_log_space else 1.0
+
+        for t in reversed(range(obs_len - 1)):
+            next_term = self.mul(self.emit_probs[:, obs_indices[t + 1]], bwd[:, t + 1])
+            bwd[:, t] = self.sum_states(self.trans_probs, next_term)
+
+        if self.use_log_space:
+            total_prob = np.logaddexp.reduce(
+                self.init_probs + self.emit_probs[:, obs_indices[0]] + bwd[:, 0]
+            )
+        else:
+            total_prob = np.sum(
+                self.init_probs * self.emit_probs[:, obs_indices[0]] * bwd[:, 0]
+            )
+        return total_prob, bwd
+
     @classmethod
     def from_json(cls, path: str) -> HiddenMarkovModel:
         """Load HMM parameters from JSON"""
@@ -126,16 +193,12 @@ class HiddenMarkovModel:
         return HiddenMarkovModel(log_init_probs, log_trans_probs, log_emit_probs, use_log_space=True)
 
 if __name__ == "__main__":
-    INIT_PROBS = {"I": 0.1, "G": 0.9}
-    TRANS_PROBS = {"I": {"I": 0.6, "G": 0.4},
-                   "G": {"I": 0.1, "G": 0.9}}
-    EMIT_PROBS = {"I": {"A": 0.1, "C": 0.4, "G": 0.4, "T": 0.1},
-                  "G": {"A": 0.4, "C": 0.1, "G": 0.1, "T": 0.4}}
-
-    hmm = HiddenMarkovModel(INIT_PROBS, TRANS_PROBS, EMIT_PROBS)
+    hmm = HiddenMarkovModel.from_json("params.json")
     hmm = hmm.to_log_space()
-
     obs = "ACGT"
-    result = hmm.viterbi(obs)
-
-    print(result)
+    bwd = hmm.backward(obs)
+    fwd = hmm.forward(obs)
+    vit = hmm.viterbi(obs)
+    print(bwd)
+    print(fwd)
+    print(vit)
