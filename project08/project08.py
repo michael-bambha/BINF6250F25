@@ -6,6 +6,7 @@ Authors: Michael Bambha and Jason Bae
 from __future__ import annotations
 import json
 import numpy as np
+from pprint import pformat
 
 class HiddenMarkovModel:
     """Class for storing our HMM"""
@@ -45,6 +46,17 @@ class HiddenMarkovModel:
         self.zero = -np.inf if use_log_space else 0.0
         self.mul = np.add if use_log_space else np.multiply
 
+    def __str__(self):
+        return pformat(vars(self))
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return {
+                "init": self._init_dict.get(key),
+                "transitions": self._trans_dict.get(key),
+                "emissions": self._emit_dict.get(key),
+            }
+
     def sum_states(self, matrix: np.ndarray, prev: np.ndarray) -> np.ndarray:
         """
         In the forward and backward algorithms, we need different math operations
@@ -57,6 +69,8 @@ class HiddenMarkovModel:
         """
         if getattr(self, "use_log_space", False):
             return np.logaddexp.reduce(matrix.T + prev[:, None], axis=0)
+        # np.sum(A*B) is the same as A.T @ B in this case
+        # A and B are 1d arrays of identical length
         return matrix.T @ prev
 
     def viterbi(self, observation: str) -> tuple[np.ndarray, list[str]]:
@@ -128,7 +142,7 @@ class HiddenMarkovModel:
         tot_prob = self.add(fwd[:, -1])
         return tot_prob, fwd
 
-    def backward(self, observation):
+    def backward(self, observation) -> tuple[float, np.ndarray]:
         """
         Find the probability of seeing an observation given the model
         through the backward algorithm
@@ -202,3 +216,5 @@ if __name__ == "__main__":
     print(bwd)
     print(fwd)
     print(vit)
+    print(hmm)
+    print(hmm["I"])
