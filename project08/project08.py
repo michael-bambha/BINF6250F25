@@ -159,7 +159,7 @@ class HiddenMarkovModel:
 
         for t in reversed(range(obs_len - 1)):
             next_term = self.mul(self.emit_probs[:, obs_indices[t + 1]], bwd[:, t + 1])
-            bwd[:, t] = self.sum_states(self.trans_probs, next_term)
+            bwd[:, t] = self.sum_states(self.trans_probs.T, next_term)
 
         if self.use_log_space:
             total_prob = np.logaddexp.reduce(
@@ -216,5 +216,3 @@ if __name__ == "__main__":
     print(bwd)
     print(fwd)
     print(vit)
-    print(hmm)
-    print(hmm["I"])
