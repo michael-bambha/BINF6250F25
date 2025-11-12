@@ -44,6 +44,8 @@ class HiddenMarkovModel:
             self.add = lambda *args: np.add(*args) if len(args) > 1 else np.sum(args[0])
         self.zero = -np.inf if use_log_space else 0.0
         self.mul = np.add if use_log_space else np.multiply
+        self.div = np.subtract if use_log_space else np.divide
+
 
     def sum_states(self, matrix: np.ndarray, prev: np.ndarray) -> np.ndarray:
         """
@@ -157,6 +159,21 @@ class HiddenMarkovModel:
             )
         return total_prob, bwd
 
+    def forward_backward(self, observation, state, symbol):
+        sym_index = self.sym_idx[symbol]
+        state_index = self.state_idx[state]
+
+        seq_prob, fwd = self.forward(observation)
+        seq_prob, bwd = self.backward(observation)
+
+        fwd_prob = fwd[state_index, sym_index]
+        bwd_prob = bwd[state_index, sym_index]
+
+        combined = self.mul(fwd_prob, bwd_prob)
+        mpp = self.div(combined, seq_prob)
+
+        return mpp
+    
     @classmethod
     def from_json(cls, path: str) -> HiddenMarkovModel:
         """Load HMM parameters from JSON"""
