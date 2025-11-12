@@ -38,7 +38,6 @@ class HiddenMarkovModel:
             [emit_probs[s][sym] for sym in self.symbols]
             for s in self.states
         ])
-
         if use_log_space:
             self.add = lambda *args: np.logaddexp(*args) if len(args) > 1 else np.logaddexp.reduce(args[0])
         else:
@@ -49,6 +48,7 @@ class HiddenMarkovModel:
 
 
     def __str__(self):
+        # pretty print format so it looks nice if we print out the class
         return pformat(vars(self))
 
     def __getitem__(self, key):
@@ -65,11 +65,14 @@ class HiddenMarkovModel:
         for summing over states when in log space or probability space. We
         take the dot product of A @ B in prob space, while we need to use
         logaddexp.reduce for log space.
-        :param matrix: matrix A
-        :param prev: matrix B
-        :return: A @ B if in probability space,
+        :param matrix: alpha (our current forward matrix)
+        :param prev: 1d array of probabilities for all states at a time t
+        :return: A @ B if in probability space, logaddexp.reduce() if logspace
         """
+        # sum(p(xt | xt-1)alpha(xt-1))
         if getattr(self, "use_log_space", False):
+            # we reshape prev to be explicitly 1D so it broadcasts along columns
+            # axis=0 means collapses on rows -- so logaddexp.reduce() on cols
             return np.logaddexp.reduce(matrix.T + prev[:, None], axis=0)
         # np.sum(A*B) is the same as A.T @ B in this case
         # A and B are 1d arrays of identical length
@@ -136,9 +139,12 @@ class HiddenMarkovModel:
         fwd = np.full((num_states, obs_len), self.zero)
         # initialization step is identical to viterbi
         fwd[:, 0] = self.mul(self.init_probs, self.emit_probs[:, obs_indices[0]])
-
+        # fwd[:, t-1] = alpha(xt - 1)
+        # self.emit_probs[:, obs_indices[t]] = p(yt | xt)
         for t in range(1, obs_len):
+            # summed = sum(p (xt | xt-1) alpha(xt-1))
             summed = self.sum_states(self.trans_probs, fwd[:, t - 1])
+            # fwd[:, t] = p(yt | xt)sum(p(xt | xt-1)alpha(xt-1))
             fwd[:, t] = self.mul(self.emit_probs[:, obs_indices[t]], summed)
 
         tot_prob = self.add(fwd[:, -1])
@@ -173,29 +179,26 @@ class HiddenMarkovModel:
             )
         return total_prob, bwd
 
-    def forward_backward(self, observation, state, symbol):
+    def forward_backward(self, observation: str):
         """
         Implementation of the forward backward algorithm - find the probability
         for a certain state at a specific point, given the model and observation.
         :param observation: Observation (sequence)
-        :param state: Hidden State
-        :param symbol:
-        :return:
+        :return: posterior probability matrix showing P(xt = s | y1:t) for all s and t
         """
-        sym_index = self.sym_idx[symbol]
-        state_index = self.state_idx[state]
+        _, fwd = self.forward(observation)
+        _, bwd = self.backward(observation)
+        posterior = self.mul(fwd, bwd)
+        # posterior is currently a joint probability -- we need conditional P(xt = s | y1:t)
+        # P(xt = s | y1:t) = P(xt = s, y1:t) / P(y1:t))
+        # logaddexp.reduce() if log space, otherwise sum
+        if self.use_log_space:
+            posterior -= np.logaddexp.reduce(posterior, axis=0, keepdims=True)
+        else:
+            posterior /= posterior.sum(axis=0, keepdims=True)
 
-        seq_prob, fwd = self.forward(observation)
-        seq_prob, bwd = self.backward(observation)
+        return posterior
 
-        fwd_prob = fwd[state_index, sym_index]
-        bwd_prob = bwd[state_index, sym_index]
-
-        combined = self.mul(fwd_prob, bwd_prob)
-        mpp = self.div(combined, seq_prob)
-
-        return mpp
-    
     @classmethod
     def from_json(cls, path: str) -> HiddenMarkovModel:
         """Load HMM parameters from JSON"""
@@ -238,6 +241,9 @@ if __name__ == "__main__":
     bwd = hmm.backward(obs)
     fwd = hmm.forward(obs)
     vit = hmm.viterbi(obs)
+    fwd_bwd = hmm.forward_backward(obs)
     print(bwd)
     print(fwd)
-    print(vit)
+    print(np.exp(fwd_bwd))
+    # print(hmm.state_idx)
+    # print(vit)

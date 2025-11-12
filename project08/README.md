@@ -3,12 +3,41 @@ Project 08 -- Viterbi, Forward, Backward, Forward-Backward,
 and Baum-Welch algorithms for HMMs
 
 # Pseudocode
-Put pseudocode in this box:
+
+## Forward:
+```
+We will keep the initialization the same from Viterbi:
+    
+    - first col of fwd = init probs * emission probs at t[0]
+        ^ for each state s, find prob of starting in state S and
+        observing the observation (great wording I know)
+    - then for t in range(1:end):
+        - for each state s:
+            - initialize our prob
+            - incrementally add to the prob the previous fwd mtx *
+            trans probs
+        - update fwd[s, t] as emission probs * prob from earlier
+    
+    - termination - sum over all states s of fwd[s, t] 
+
 
 ```
-Some pseudocode here
+## Backward:
+
+```
+Now basically we do the same thing as fwd, but we iterate in
+reverse. Can use reversed() for this.
+
+will need to initialize to 1 (or to 0 for log)
+and combine over next states instead of previous.
 ```
 
+## Forward-Backward:
+
+```
+Call forward() and backward().
+
+```
 # Successes
 We refactored the code to be class-based which was incredibly
 helpful for implementations of multiple algorithms.
@@ -18,6 +47,25 @@ Description of the stumbling blocks the team experienced
 
 # Personal Reflections
 ## Group Leader
+Forward/Backward implementations were not super complex. We simply just
+reused the logic from the Viterbi algorithm for the general 
+dynamic programming approach, just with removing the traceback
+and replacing max/argmax with our `sum_states` function. I realized
+that summing + elementwise multiplication was just doing the
+matrix dot product, so that was a nice simplification. Then
+the forward-backward is just calling both of our previous
+implementations to compute the mpp. 
+
+I did struggle with how to handle both log and probability space,
+and it's not completely perfect as-is (I still coded in some `if`
+statements here and there, didn't have time to continually refactor),
+but I was pretty happy with what we had in general.
+
+Also coding in the model as a global variable bothered me from a
+programming standpoint and it looked messy so I just decided to load
+the parameters from JSON instead with a simple class method.
+
+
 
 ## Other member
 Other members' reflections on the project
