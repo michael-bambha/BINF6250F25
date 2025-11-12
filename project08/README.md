@@ -36,14 +36,24 @@ and combine over next states instead of previous.
 
 ```
 Call forward() and backward().
-
+Multiply forward and backward mtxs
+Then normalize to a conditional probability (as multiplying gives us joint)
 ```
 # Successes
 We refactored the code to be class-based which was incredibly
-helpful for implementations of multiple algorithms.
+helpful for implementations of multiple algorithms, and we have
+implemented Viterbi, forward, backward, and forward-backward algorithms 
+successfully.
 
 # Struggles
-Description of the stumbling blocks the team experienced
+One of the biggest issues was code organization, structure, and making something that is extendable
+for future usage. One issue is handling log space, which was not necessarily conceptually challenging,
+but from a clean code perspective was hard to implement. Initially we had if statements at each calculation,
+which was becoming cumbersome and also just hard to read. We ended up solving this with
+a neat design pattern (see AI note below). Beyond that, most of the struggles were more
+regarding the mathematics of the algorithms themselves - while the concepts of what the 
+algorithms took in, what they output, and what they're used for wasn't too complicated, understanding the subtelties of the
+underlying math was more tricky. 
 
 # Personal Reflections
 ## Group Leader
@@ -54,7 +64,12 @@ and replacing max/argmax with our `sum_states` function. I realized
 that summing + elementwise multiplication was just doing the
 matrix dot product, so that was a nice simplification. Then
 the forward-backward is just calling both of our previous
-implementations to compute the mpp. 
+implementations to compute the mpp. In terms of coding, most of the time I spent was taken
+to understand how to properly broadcast matrices and vectors
+(initially I forgot to reshape and it was causing problems).
+However a lot of the time was spent going over the math in the iteration
+steps and termination step and understanding how matrix operations are being
+applied in those contexts.
 
 I did struggle with how to handle both log and probability space,
 and it's not completely perfect as-is (I still coded in some `if`
