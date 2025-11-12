@@ -174,6 +174,14 @@ class HiddenMarkovModel:
         return total_prob, bwd
 
     def forward_backward(self, observation, state, symbol):
+        """
+        Implementation of the forward backward algorithm - find the probability
+        for a certain state at a specific point, given the model and observation.
+        :param observation: Observation (sequence)
+        :param state: Hidden State
+        :param symbol:
+        :return:
+        """
         sym_index = self.sym_idx[symbol]
         state_index = self.state_idx[state]
 
