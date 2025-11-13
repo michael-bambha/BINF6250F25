@@ -150,7 +150,7 @@ class HiddenMarkovModel:
         tot_prob = self.add(fwd[:, -1])
         return tot_prob, fwd
 
-    def backward(self, observation) -> tuple[float, np.ndarray]:
+    def backward(self, observation):
         """
         Find the probability of seeing an observation given the model
         through the backward algorithm
@@ -167,19 +167,13 @@ class HiddenMarkovModel:
 
         for t in reversed(range(obs_len - 1)):
             next_term = self.mul(self.emit_probs[:, obs_indices[t + 1]], bwd[:, t + 1])
-            bwd[:, t] = self.sum_states(self.trans_probs.T, next_term)
+            bwd[:, t] = self.sum_states(self.trans_probs, next_term)
 
-        if self.use_log_space:
-            total_prob = np.logaddexp.reduce(
-                self.init_probs + self.emit_probs[:, obs_indices[0]] + bwd[:, 0]
-            )
-        else:
-            total_prob = np.sum(
-                self.init_probs * self.emit_probs[:, obs_indices[0]] * bwd[:, 0]
-            )
+        total_prob = self.prob(self.init_probs * self.emit_probs[:, obs_indices[0]] * bwd[:, 0])
+
         return total_prob, bwd
 
-    def forward_backward(self, observation: str):
+    def forward_backward(self, observation):
         """
         Implementation of the forward backward algorithm - find the probability
         for a certain state at a specific point, given the model and observation.
@@ -192,10 +186,8 @@ class HiddenMarkovModel:
         # posterior is currently a joint probability -- we need conditional P(xt = s | y1:t)
         # P(xt = s | y1:t) = P(xt = s, y1:t) / P(y1:t))
         # logaddexp.reduce() if log space, otherwise sum
-        if self.use_log_space:
-            posterior -= np.logaddexp.reduce(posterior, axis=0, keepdims=True)
-        else:
-            posterior /= posterior.sum(axis=0, keepdims=True)
+
+        posterior = self.div(posterior, self.prob(posterior, axis=0, keepdims=True))
 
         return posterior
 
