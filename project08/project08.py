@@ -15,7 +15,9 @@ class HiddenMarkovModel:
             init_probs: dict[str, float],
             trans_probs: dict[str, dict[str, float]],
             emit_probs: dict[str, dict[str, float]],
+            alphabet: list[str] = None,
             use_log_space: bool = False,
+
     ):
         self.use_log_space = use_log_space
 
@@ -23,7 +25,9 @@ class HiddenMarkovModel:
         self._init_dict = init_probs
         self._trans_dict = trans_probs
         self._emit_dict = emit_probs
-
+        self.alphabet = alphabet
+        if not self.alphabet:
+            self.alphabet = "AGCT"
         self.states = list(init_probs.keys())
         self.symbols = list(next(iter(emit_probs.values())).keys())
         self.state_idx = {s: i for i, s in enumerate(self.states)}
@@ -58,6 +62,10 @@ class HiddenMarkovModel:
                 "transitions": self._trans_dict.get(key),
                 "emissions": self._emit_dict.get(key),
             }
+
+    @property
+    def alphabet_size(self):
+        return len(self.alphabet)
 
     def sum_states(self, matrix: np.ndarray, prev: np.ndarray) -> np.ndarray:
         """
@@ -150,7 +158,7 @@ class HiddenMarkovModel:
         tot_prob = self.add(fwd[:, -1])
         return tot_prob, fwd
 
-    def backward(self, observation):
+    def backward(self, observation) -> tuple[float, np.ndarray]:
         """
         Find the probability of seeing an observation given the model
         through the backward algorithm
@@ -167,29 +175,72 @@ class HiddenMarkovModel:
 
         for t in reversed(range(obs_len - 1)):
             next_term = self.mul(self.emit_probs[:, obs_indices[t + 1]], bwd[:, t + 1])
-            bwd[:, t] = self.sum_states(self.trans_probs, next_term)
+            bwd[:, t] = self.sum_states(self.trans_probs.T, next_term)
 
-        total_prob = self.prob(self.init_probs * self.emit_probs[:, obs_indices[0]] * bwd[:, 0])
-
+        if self.use_log_space:
+            total_prob = np.logaddexp.reduce(
+                self.init_probs + self.emit_probs[:, obs_indices[0]] + bwd[:, 0]
+            )
+        else:
+            total_prob = np.sum(
+                self.init_probs * self.emit_probs[:, obs_indices[0]] * bwd[:, 0]
+            )
         return total_prob, bwd
 
-    def forward_backward(self, observation):
+    def forward_backward(self, observation: str, fwd: np.ndarray, bwd: np.ndarray):
         """
         Implementation of the forward backward algorithm - find the probability
         for a certain state at a specific point, given the model and observation.
+        :param bwd:
+        :param fwd:
         :param observation: Observation (sequence)
         :return: posterior probability matrix showing P(xt = s | y1:t) for all s and t
         """
-        _, fwd = self.forward(observation)
-        _, bwd = self.backward(observation)
         posterior = self.mul(fwd, bwd)
         # posterior is currently a joint probability -- we need conditional P(xt = s | y1:t)
         # P(xt = s | y1:t) = P(xt = s, y1:t) / P(y1:t))
         # logaddexp.reduce() if log space, otherwise sum
-
-        posterior = self.div(posterior, self.prob(posterior, axis=0, keepdims=True))
+        if self.use_log_space:
+            posterior -= np.logaddexp.reduce(posterior, axis=0, keepdims=True)
+        else:
+            posterior /= posterior.sum(axis=0, keepdims=True)
 
         return posterior
+
+    def baum_welch(self, observation: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+
+        :param observation:
+        :return:
+        """
+        # We will currently assume that the parameters are initialized when the model is called
+        _, fwd = self.forward(observation)
+        _, bwd = self.backward(observation)
+        obs_indices = np.array([self.sym_idx[symbol] for symbol in observation])
+        posterior = self.forward_backward(observation, fwd, bwd)
+        T = len(observation)
+        # the full xi is a 3D array, since we are looking at state i and j across all t (3 dimensions)
+        # aij* = sum(t=0:T-2) xi(t)(i,j) / sum(t=0:T-2)(gamma(t)(i))
+        xi = np.zeros((T-1, len(self.states), len(self.states)))
+        # we use some broadcasting tricks to vectorize the operation, but we still need to loop over each t
+        # xi(t) needs to end up as an NxN matrix (the full xi will then be T-1xNxN)
+        # fwd[t][:, None] = (N, 1); trans_probs = (N, N); emit_probs[t+1][None, :] = (1, N); bwd[t+1][None, :] = (1, N)
+        # we will end up yielding an NxN matrix for all T-1
+        for t in range(T-1):
+            xi_num = fwd[:, t][:, None] * self.trans_probs * self.emit_probs[:, obs_indices[t+1]][None, :] * bwd[:, t+1][None, :]
+            xi_denom = np.sum(xi_num)
+            xi[t] = xi_num / xi_denom
+        pi = xi[0]
+        aij_num = np.sum(xi, axis=0) # (N, N)
+        aij_denom = np.sum(posterior[:-1], axis=1) # (N, )
+        aij = aij_num / aij_denom[:, None]
+        mask = obs_indices[:, None] == np.arange(self.alphabet_size)[None, :]
+        # reshape posterior to (T, N, 1) and mask to (T, 1, K)
+        # multiplying gives us (T, N, K)
+        bi_num = (posterior.T[:, :, None] * mask[:, None, :]).sum(axis=0)
+        bi_denom = np.sum(posterior, axis=1)
+        bi = bi_num / bi_denom[:, None]
+        return pi, aij, bi
 
     @classmethod
     def from_json(cls, path: str) -> HiddenMarkovModel:
@@ -229,13 +280,10 @@ class HiddenMarkovModel:
 if __name__ == "__main__":
     hmm = HiddenMarkovModel.from_json("params.json")
     hmm = hmm.to_log_space()
-    obs = "ACGT"
-    bwd = hmm.backward(obs)
-    fwd = hmm.forward(obs)
-    vit = hmm.viterbi(obs)
-    fwd_bwd = hmm.forward_backward(obs)
-    print(bwd)
-    print(fwd)
-    print(np.exp(fwd_bwd))
-    # print(hmm.state_idx)
-    # print(vit)
+    obs = "ACGTTTAGC"
+    print(hmm.trans_probs)
+    print(hmm.state_idx)
+    print(hmm.sym_idx)
+    obs_indices = np.array([hmm.sym_idx[symbol] for symbol in obs])
+    print(hmm.baum_welch(obs))
+
