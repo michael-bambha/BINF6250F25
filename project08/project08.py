@@ -3,6 +3,8 @@ File: project08.py
 Description: BINF6250 project 8
 Authors: Michael Bambha and Jason Bae
 """
+# TODO: getting NaNs for alpha which probably has something to do with the loop range and the fact that xi is initialized to 0
+
 from __future__ import annotations
 import json
 import numpy as np
@@ -187,13 +189,12 @@ class HiddenMarkovModel:
             )
         return total_prob, bwd
 
-    def forward_backward(self, observation: str, fwd: np.ndarray, bwd: np.ndarray):
+    def forward_backward(self, fwd: np.ndarray, bwd: np.ndarray):
         """
         Implementation of the forward backward algorithm - find the probability
         for a certain state at a specific point, given the model and observation.
-        :param bwd:
-        :param fwd:
-        :param observation: Observation (sequence)
+        :param bwd: Backward matrix for a given observation
+        :param fwd: Forward matrix for a given observation
         :return: posterior probability matrix showing P(xt = s | y1:t) for all s and t
         """
         posterior = self.mul(fwd, bwd)
@@ -209,18 +210,28 @@ class HiddenMarkovModel:
 
     def baum_welch(self, observation: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
+        Implementation of the Baum-Welch algorithm to find probabilities for initial (pi), transition (alpha),
+        and emission (b) matrices for a given number of hidden states and a known observation.
 
-        :param observation:
-        :return:
+        This function assumes that the initial guesses for the probabilities have already been instantiated with
+        the class constructor.
+
+        Variable names reference the equations in the associated Baum_Welch.md file.
+
+        :param observation: String corresponding to an observation of events. Assumes that the string is ordered
+        in increasing time, and each event should be encoded as a single character.
+        :return: initial (pi), transition (alpha) and emission (b) matrix updates, given the observation,
+        guesses about the model, and a known number of hidden states.
         """
         # We will currently assume that the parameters are initialized when the model is called
         _, fwd = self.forward(observation)
         _, bwd = self.backward(observation)
         obs_indices = np.array([self.sym_idx[symbol] for symbol in observation])
-        posterior = self.forward_backward(observation, fwd, bwd)
+        gamma = self.forward_backward(fwd, bwd)
         T = len(observation)
         # the full xi is a 3D array, since we are looking at state i and j across all t (3 dimensions)
         # aij* = sum(t=0:T-2) xi(t)(i,j) / sum(t=0:T-2)(gamma(t)(i))
+        # TODO: this shouldn't be zeros since we'll get divide by 0 - just for testing
         xi = np.zeros((T-1, len(self.states), len(self.states)))
         # we use some broadcasting tricks to vectorize the operation, but we still need to loop over each t
         # xi(t) needs to end up as an NxN matrix (the full xi will then be T-1xNxN)
@@ -230,15 +241,25 @@ class HiddenMarkovModel:
             xi_num = fwd[:, t][:, None] * self.trans_probs * self.emit_probs[:, obs_indices[t+1]][None, :] * bwd[:, t+1][None, :]
             xi_denom = np.sum(xi_num)
             xi[t] = xi_num / xi_denom
-        pi = posterior[:, 0]
+        pi = gamma[:, 0]
         aij_num = np.sum(xi, axis=0) # (N, N)
-        aij_denom = np.sum(posterior[:-1], axis=1) # (N, )
+        # transition matrix explicitly excludes the last entry (since you can't transition from the last thing to nothing)
+        aij_denom = np.sum(gamma[:-1], axis=1) # (N, )
         aij = aij_num / aij_denom[:, None]
+        # bi(vk) = sum(t=1:T) gamma(i)(t) s.t. yt=vk / gamma(i)(t)
+        # since we need to find where yt=vk, we can vectorize this with a boolean mask
+        # below creates a np array called "mask", consisting of booleans of shape TxK due to broadcasting`
+        # note we reshaped obs_indices to be (T,1) and the alphabet vector to be (1,K) which produces TxK
+        # results in a matrix where mask[t,k] = (obs_indices[t] == k)
         mask = obs_indices[:, None] == np.arange(self.alphabet_size)[None, :]
-        # reshape posterior to (T, N, 1) and mask to (T, 1, K)
-        # multiplying gives us (T, N, K)
-        bi_num = (posterior.T[:, :, None] * mask[:, None, :]).sum(axis=0)
-        bi_denom = np.sum(posterior, axis=1)
+        # reshape gamma to (T, N, 1) and mask to (T, 1, K)
+        # multiplying gives us shape (T, N, K)
+        # this uses the mask from before to only count where obs_indices[t] == k
+        # we have to transpose so that the time axis aligns properly
+        # note we need to add a 3rd axis here because mask is (TxK) and gamma.T is (T, N) - we need all combos
+        bi_num = (gamma.T[:, :, None] * mask[:, None, :]).sum(axis=0)
+        bi_denom = np.sum(gamma, axis=1)
+        # reshape the denominator to be a column vector so it can be broadcast across rows
         bi = bi_num / bi_denom[:, None]
         return pi, aij, bi
 

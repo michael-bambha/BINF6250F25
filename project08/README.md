@@ -167,7 +167,16 @@ which was becoming cumbersome and also just hard to read. We ended up solving th
 a neat design pattern (see AI note below). Beyond that, most of the struggles were more
 regarding the mathematics of the algorithms themselves - while the concepts of what the 
 algorithms took in, what they output, and what they're used for wasn't too complicated, understanding the subtelties of the
-underlying math was more tricky. 
+underlying math was more tricky.
+
+Baum-Welch: This algorithm is honestly extremely math-heavy and implementing it was a challenge.
+Part of the issue is that the "ksi" matrix is actually a 3D array and broadcasting operations over 3
+dimensions became increasingly confusing to keep track of. Conceptually it didn't seem that
+hard to understand what was going on, but specifically trying to vectorize multiple
+calculations over several dimensions at once is hard to do in code. We ran into several
+numpy broadcasting errors saying the shapes of the two arrays are not compatible.
+Generally this was due to forgetting to explicitly reshape, or summing over
+the incorrect axes.
 
 # Personal Reflections
 ## Group Leader
@@ -194,7 +203,13 @@ Also coding in the model as a global variable bothered me from a
 programming standpoint and it looked messy so I just decided to load
 the parameters from JSON instead with a simple class method.
 
+**Baum-Welch:**
 
+This really tested my coding abilities to the maximum, I will be completely honest.
+Although I had done a couple of neat broadcasting tricks like in the forward/backward algorithms
+and back in the neighbor joining algorithm, trying to do this across 3 dimensions
+completely broke my brain. That single for loop `for t in range(T-1)` which was 3 lines of code took me approximately
+3 hours of coding to get the dimensions correct.
 
 ## Other member
 Other members' reflections on the project
@@ -213,3 +228,7 @@ both log and probability space. We currently are using several
 models with log space, but it is starting to become messy as this
 needs to be done in every calculation step. Can you give some design
 patterns to centralize or clean up this logic?
+
+Additionally we used ChatGPT-5 to generate the LaTeX formatting
+for the equations - this was mainly so we could keep a markdown file
+of the math handy while we worked on the implementation to save some alt-tabbing effort.
