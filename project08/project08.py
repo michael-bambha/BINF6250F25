@@ -73,7 +73,7 @@ class HiddenMarkovModel:
         for summing over states when in log space or probability space. We
         take the dot product of A @ B in prob space, while we need to use
         logaddexp.reduce for log space.
-        :param matrix: alpha (our current forward matrix)
+        :param matrix: alpha (transition probs)
         :param prev: 1d array of probabilities for all states at a time t
         :return: A @ B if in probability space, logaddexp.reduce() if logspace
         """
@@ -224,13 +224,13 @@ class HiddenMarkovModel:
         xi = np.zeros((T-1, len(self.states), len(self.states)))
         # we use some broadcasting tricks to vectorize the operation, but we still need to loop over each t
         # xi(t) needs to end up as an NxN matrix (the full xi will then be T-1xNxN)
-        # fwd[t][:, None] = (N, 1); trans_probs = (N, N); emit_probs[t+1][None, :] = (1, N); bwd[t+1][None, :] = (1, N)
+        # fwd[:, t][:, None] = (N, 1); trans_probs = (N, N); emit_probs[t+1][None, :] = (1, N); bwd[:, t+1][None, :] = (1, N)
         # we will end up yielding an NxN matrix for all T-1
         for t in range(T-1):
             xi_num = fwd[:, t][:, None] * self.trans_probs * self.emit_probs[:, obs_indices[t+1]][None, :] * bwd[:, t+1][None, :]
             xi_denom = np.sum(xi_num)
             xi[t] = xi_num / xi_denom
-        pi = xi[0]
+        pi = posterior[:, 0]
         aij_num = np.sum(xi, axis=0) # (N, N)
         aij_denom = np.sum(posterior[:-1], axis=1) # (N, )
         aij = aij_num / aij_denom[:, None]
