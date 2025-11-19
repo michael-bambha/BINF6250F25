@@ -212,7 +212,15 @@ completely broke my brain. That single for loop `for t in range(T-1)` which was 
 3 hours of coding to get the dimensions correct.
 
 ## Other member
-Other members' reflections on the project
+The Forward/Backward implementations were not complex conceptually, as they were similar to the
+Viterbi algorithm but with summation instead of choosing the max. However, I really appreciate Michael's 
+deep knowledge of numpy arrays, as he was able to introduce a ton of array manipulation and math to me 
+that reduced all the steps to a few lines of code. 
+
+For Baum-Welch, this concept really stumped me. Once again, Michael hard-carried with his array 
+methods that made calculations cleanly and comprehensively, otherwise there would have been a ton 
+more looping involved if I designed it. 
+
 
 # Generative AI Appendix
 ChatGPT-5 was used to assist with some organizational and
