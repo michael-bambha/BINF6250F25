@@ -49,7 +49,7 @@ class HiddenMarkovModel:
         else:
             self.add = lambda *args: np.add(*args) if len(args) > 1 else np.sum(args[0])
         self.zero = -np.inf if use_log_space else 0.0
-        self.mul = np.add if use_log_space else np.multiply
+        self.mul = np.add.reduce if use_log_space else np.multiply.reduce
         self.div = np.subtract if use_log_space else np.divide
 
 
@@ -231,21 +231,20 @@ class HiddenMarkovModel:
         T = len(observation)
         # the full xi is a 3D array, since we are looking at state i and j across all t (3 dimensions)
         # aij* = sum(t=0:T-2) xi(t)(i,j) / sum(t=0:T-2)(gamma(t)(i))
-        # TODO: this shouldn't be zeros since we'll get divide by 0 - just for testing
-        xi = np.zeros((T-1, len(self.states), len(self.states)))
+        xi = np.zeros((T-2, len(self.states), len(self.states)))
         # we use some broadcasting tricks to vectorize the operation, but we still need to loop over each t
         # xi(t) needs to end up as an NxN matrix (the full xi will then be T-1xNxN)
         # fwd[:, t][:, None] = (N, 1); trans_probs = (N, N); emit_probs[t+1][None, :] = (1, N); bwd[:, t+1][None, :] = (1, N)
         # we will end up yielding an NxN matrix for all T-1
-        for t in range(T-1):
-            xi_num = fwd[:, t][:, None] * self.trans_probs * self.emit_probs[:, obs_indices[t+1]][None, :] * bwd[:, t+1][None, :]
-            xi_denom = np.sum(xi_num)
-            xi[t] = xi_num / xi_denom
+        for t in range(T-2):
+            xi_num = self.mul([fwd[:, t][:, None], self.trans_probs, self.emit_probs[:, obs_indices[t+1]][None, :], bwd[:, t+1][None, :]])
+            xi_denom = np.sum(xi_num) # TODO: fix pls
+            xi[t] = self.div(xi_num, xi_denom)
         pi = gamma[:, 0]
         aij_num = np.sum(xi, axis=0) # (N, N)
         # transition matrix explicitly excludes the last entry (since you can't transition from the last thing to nothing)
         aij_denom = np.sum(gamma[:-1], axis=1) # (N, )
-        aij = aij_num / aij_denom[:, None]
+        aij = self.div(aij_num, aij_denom[:, None])
         # bi(vk) = sum(t=1:T) gamma(i)(t) s.t. yt=vk / gamma(i)(t)
         # since we need to find where yt=vk, we can vectorize this with a boolean mask
         # below creates a np array called "mask", consisting of booleans of shape TxK due to broadcasting`
@@ -257,10 +256,10 @@ class HiddenMarkovModel:
         # this uses the mask from before to only count where obs_indices[t] == k
         # we have to transpose so that the time axis aligns properly
         # note we need to add a 3rd axis here because mask is (TxK) and gamma.T is (T, N) - we need all combos
-        bi_num = (gamma.T[:, :, None] * mask[:, None, :]).sum(axis=0)
+        bi_num = self.mul((gamma.T[:, :, None], mask[:, None, :])).sum(axis=0) # TODO: have to fix this sum for log space
         bi_denom = np.sum(gamma, axis=1)
         # reshape the denominator to be a column vector so it can be broadcast across rows
-        bi = bi_num / bi_denom[:, None]
+        bi = self.div(bi_num, bi_denom[:, None])
         return pi, aij, bi
 
     @classmethod
@@ -302,9 +301,5 @@ if __name__ == "__main__":
     hmm = HiddenMarkovModel.from_json("params.json")
     hmm = hmm.to_log_space()
     obs = "ACGTTTAGC"
-    print(hmm.trans_probs)
-    print(hmm.state_idx)
-    print(hmm.sym_idx)
     obs_indices = np.array([hmm.sym_idx[symbol] for symbol in obs])
-    print(hmm.baum_welch(obs))
-
+    np.add.reduce(hmm.trans_probs, )

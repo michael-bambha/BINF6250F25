@@ -120,9 +120,11 @@ Iteration Loop
 	4.	Compute $$\gamma_t(i)$$ and $$\xi_t(i,j)$$
 	5.	Update parameters using the M-step
 	6.	Compute log-likelihood
+
 $$
 \log P(O \mid \lambda) = \log\left( \sum_{i=1}^N \alpha_T(i) \right)
 $$
+
 	7.	Repeat until convergence
 
 ```
