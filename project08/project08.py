@@ -3,12 +3,12 @@ File: project08.py
 Description: BINF6250 project 8
 Authors: Michael Bambha and Jason Bae
 """
-# TODO: getting NaNs for alpha which probably has something to do with the loop range and the fact that xi is initialized to 0
 
 from __future__ import annotations
 import json
 import numpy as np
 from pprint import pformat
+from functools import reduce
 
 class HiddenMarkovModel:
     """Class for storing our HMM"""
@@ -48,8 +48,18 @@ class HiddenMarkovModel:
             self.add = lambda *args: np.logaddexp(*args) if len(args) > 1 else np.logaddexp.reduce(args[0])
         else:
             self.add = lambda *args: np.add(*args) if len(args) > 1 else np.sum(args[0])
+        self.agg = np.logaddexp.reduce if use_log_space else np.sum
         self.zero = -np.inf if use_log_space else 0.0
-        self.mul = np.add.reduce if use_log_space else np.multiply.reduce
+
+        # this is our solution for multiplying/adding several arrays at once
+        # if you try np.add/multiply.reduce, it needs all arrays in the same shape
+        # since we broadcast, we create intermediate arrays of different shapes and add.reduce will fail.
+        # functools reduce basically applies functions pairwise from left to right (which is what we need to do anyway)
+        if use_log_space:
+            self.mul = lambda *args: reduce(np.add, args) if len(args) > 1 else args[0]
+        else:
+            self.mul = lambda *args: reduce(np.multiply, args) if len(args) > 1 else args[0]
+
         self.div = np.subtract if use_log_space else np.divide
 
 
@@ -69,24 +79,31 @@ class HiddenMarkovModel:
     def alphabet_size(self):
         return len(self.alphabet)
 
-    def sum_states(self, matrix: np.ndarray, prev: np.ndarray) -> np.ndarray:
+    def _sum_over_prev(self, trans: np.ndarray, prev: np.ndarray) -> np.ndarray:
         """
-        In the forward and backward algorithms, we need different math operations
-        for summing over states when in log space or probability space. We
-        take the dot product of A @ B in prob space, while we need to use
-        logaddexp.reduce for log space.
-        :param matrix: alpha (transition probs)
-        :param prev: 1d array of probabilities for all states at a time t
-        :return: A @ B if in probability space, logaddexp.reduce() if logspace
+        Compute s_j = sum_i prev_i * trans[i, j]
+        In log-space this is logaddexp over i of (prev[i] + trans[i,j])
         """
-        # sum(p(xt | xt-1)alpha(xt-1))
-        if getattr(self, "use_log_space", False):
-            # we reshape prev to be explicitly 1D so it broadcasts along columns
-            # axis=0 means collapses on rows -- so logaddexp.reduce() on cols
-            return np.logaddexp.reduce(matrix.T + prev[:, None], axis=0)
-        # np.sum(A*B) is the same as A.T @ B in this case
-        # A and B are 1d arrays of identical length
-        return matrix.T @ prev
+        if self.use_log_space:
+            # prev[:, None] + trans -> (N,1) + (N,N) -> (N,N) with element (i,j) = prev[i] + trans[i,j]
+            # reduce over axis=0 to collapse i -> vector length N for j
+            return np.logaddexp.reduce(prev[:, None] + trans, axis=0)
+        else:
+            # for probabilities: (trans.T @ prev) gives sum_i prev_i * trans[i,j]
+            return trans.T @ prev
+
+    def _sum_over_next(self, trans: np.ndarray, next_term: np.ndarray) -> np.ndarray:
+        """
+        Compute s_i = sum_j trans[i, j] * next_term[j]
+        In log-space: logaddexp over j of (trans[i,j] + next_term[j])
+        """
+        if self.use_log_space:
+            # trans + next_term[None, :] -> (N,N) element (i,j) = trans[i,j] + next_term[j]
+            # reduce over axis=1 to collapse j -> vector length N for i
+            return np.logaddexp.reduce(trans + next_term[None, :], axis=1)
+        else:
+            # probabilities: matrix-vector product trans @ next_term
+            return trans @ next_term
 
     def viterbi(self, observation: str) -> tuple[np.ndarray, list[str]]:
         """
@@ -153,12 +170,12 @@ class HiddenMarkovModel:
         # self.emit_probs[:, obs_indices[t]] = p(yt | xt)
         for t in range(1, obs_len):
             # summed = sum(p (xt | xt-1) alpha(xt-1))
-            summed = self.sum_states(self.trans_probs, fwd[:, t - 1])
+            summed = self._sum_over_prev(self.trans_probs, fwd[:, t - 1])
             # fwd[:, t] = p(yt | xt)sum(p(xt | xt-1)alpha(xt-1))
             fwd[:, t] = self.mul(self.emit_probs[:, obs_indices[t]], summed)
 
-        tot_prob = self.add(fwd[:, -1])
-        return tot_prob, fwd
+        total_prob = self.add(fwd[:, -1])
+        return total_prob, fwd
 
     def backward(self, observation) -> tuple[float, np.ndarray]:
         """
@@ -177,7 +194,7 @@ class HiddenMarkovModel:
 
         for t in reversed(range(obs_len - 1)):
             next_term = self.mul(self.emit_probs[:, obs_indices[t + 1]], bwd[:, t + 1])
-            bwd[:, t] = self.sum_states(self.trans_probs.T, next_term)
+            bwd[:, t] = self._sum_over_next(self.trans_probs.T, next_term)
 
         if self.use_log_space:
             total_prob = np.logaddexp.reduce(
@@ -231,19 +248,22 @@ class HiddenMarkovModel:
         T = len(observation)
         # the full xi is a 3D array, since we are looking at state i and j across all t (3 dimensions)
         # aij* = sum(t=0:T-2) xi(t)(i,j) / sum(t=0:T-2)(gamma(t)(i))
-        xi = np.zeros((T-2, len(self.states), len(self.states)))
+        xi = np.zeros((T-1, len(self.states), len(self.states)))
         # we use some broadcasting tricks to vectorize the operation, but we still need to loop over each t
         # xi(t) needs to end up as an NxN matrix (the full xi will then be T-1xNxN)
         # fwd[:, t][:, None] = (N, 1); trans_probs = (N, N); emit_probs[t+1][None, :] = (1, N); bwd[:, t+1][None, :] = (1, N)
         # we will end up yielding an NxN matrix for all T-1
-        for t in range(T-2):
-            xi_num = self.mul([fwd[:, t][:, None], self.trans_probs, self.emit_probs[:, obs_indices[t+1]][None, :], bwd[:, t+1][None, :]])
-            xi_denom = np.sum(xi_num) # TODO: fix pls
+        for t in range(T-1):
+            xi_num = self.mul(fwd[:, t][:, None], self.trans_probs, self.emit_probs[:, obs_indices[t+1]][None, :], bwd[:, t+1][None, :])
+            if self.use_log_space:
+                xi_denom = np.logaddexp.reduce(xi_num.ravel())
+            else:
+                xi_denom = xi_num.sum()
             xi[t] = self.div(xi_num, xi_denom)
         pi = gamma[:, 0]
-        aij_num = np.sum(xi, axis=0) # (N, N)
+        aij_num = self.agg(xi, axis=0) # (N, N)
         # transition matrix explicitly excludes the last entry (since you can't transition from the last thing to nothing)
-        aij_denom = np.sum(gamma[:-1], axis=1) # (N, )
+        aij_denom = self.agg(gamma[:, :-1], axis=1) # (N, )
         aij = self.div(aij_num, aij_denom[:, None])
         # bi(vk) = sum(t=1:T) gamma(i)(t) s.t. yt=vk / gamma(i)(t)
         # since we need to find where yt=vk, we can vectorize this with a boolean mask
@@ -256,8 +276,8 @@ class HiddenMarkovModel:
         # this uses the mask from before to only count where obs_indices[t] == k
         # we have to transpose so that the time axis aligns properly
         # note we need to add a 3rd axis here because mask is (TxK) and gamma.T is (T, N) - we need all combos
-        bi_num = self.mul((gamma.T[:, :, None], mask[:, None, :])).sum(axis=0) # TODO: have to fix this sum for log space
-        bi_denom = np.sum(gamma, axis=1)
+        bi_num = self.agg(gamma.T[:, :, None] * mask[:, None, :], axis=0)
+        bi_denom = self.agg(gamma, axis=1)
         # reshape the denominator to be a column vector so it can be broadcast across rows
         bi = self.div(bi_num, bi_denom[:, None])
         return pi, aij, bi
@@ -302,4 +322,7 @@ if __name__ == "__main__":
     hmm = hmm.to_log_space()
     obs = "ACGTTTAGC"
     obs_indices = np.array([hmm.sym_idx[symbol] for symbol in obs])
-    np.add.reduce(hmm.trans_probs, )
+    pi, aij, bi = hmm.baum_welch(obs)
+    print(np.exp(pi))
+    print(np.exp(aij))
+    print(np.exp(bi))
