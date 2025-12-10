@@ -64,7 +64,30 @@ class HiddenMarkovModel:
                 "transitions": self._trans_dict.get(key),
                 "emissions": self._emit_dict.get(key),
             }
+    def set_init_probs(self, init):
+        self.init_probs = init
 
+    def set_trans_probs(self, trans):
+        self.trans_probs = trans
+
+    def set_emit_probs(self, emit):
+        self.emit_probs = emit
+
+    def update_probs(self, pi, aij, bi):
+        self.set_init_probs(pi)
+        self.set_trans_probs(aij)
+        self.set_emit_probs(bi)
+
+    def check_convergence(self, converged, convergence, pi, aij, bi):
+        converged = True
+        prev_vals = self.init_probs, self.trans_probs, self.emit_probs
+        curr_vals = pi, aij, bi
+        for i in range(3):
+            difference = np.divide(curr_vals[i], prev_vals[i]) if self.use_log_space \
+                else np.subtract(curr_vals[i], prev_vals[i])
+            if np.any(difference > convergence):
+                converged = False
+                break
     @property
     def alphabet_size(self):
         return len(self.alphabet)
@@ -223,44 +246,62 @@ class HiddenMarkovModel:
         :return: initial (pi), transition (alpha) and emission (b) matrix updates, given the observation,
         guesses about the model, and a known number of hidden states.
         """
-        # We will currently assume that the parameters are initialized when the model is called
-        _, fwd = self.forward(observation)
-        _, bwd = self.backward(observation)
-        obs_indices = np.array([self.sym_idx[symbol] for symbol in observation])
-        gamma = self.forward_backward(fwd, bwd)
-        T = len(observation)
-        # the full xi is a 3D array, since we are looking at state i and j across all t (3 dimensions)
-        # aij* = sum(t=0:T-2) xi(t)(i,j) / sum(t=0:T-2)(gamma(t)(i))
-        # TODO: this shouldn't be zeros since we'll get divide by 0 - just for testing
-        xi = np.zeros((T-1, len(self.states), len(self.states)))
-        # we use some broadcasting tricks to vectorize the operation, but we still need to loop over each t
-        # xi(t) needs to end up as an NxN matrix (the full xi will then be T-1xNxN)
-        # fwd[:, t][:, None] = (N, 1); trans_probs = (N, N); emit_probs[t+1][None, :] = (1, N); bwd[:, t+1][None, :] = (1, N)
-        # we will end up yielding an NxN matrix for all T-1
-        for t in range(T-1):
-            xi_num = fwd[:, t][:, None] * self.trans_probs * self.emit_probs[:, obs_indices[t+1]][None, :] * bwd[:, t+1][None, :]
-            xi_denom = np.sum(xi_num)
-            xi[t] = xi_num / xi_denom
-        pi = gamma[:, 0]
-        aij_num = np.sum(xi, axis=0) # (N, N)
-        # transition matrix explicitly excludes the last entry (since you can't transition from the last thing to nothing)
-        aij_denom = np.sum(gamma[:-1], axis=1) # (N, )
-        aij = aij_num / aij_denom[:, None]
-        # bi(vk) = sum(t=1:T) gamma(i)(t) s.t. yt=vk / gamma(i)(t)
-        # since we need to find where yt=vk, we can vectorize this with a boolean mask
-        # below creates a np array called "mask", consisting of booleans of shape TxK due to broadcasting`
-        # note we reshaped obs_indices to be (T,1) and the alphabet vector to be (1,K) which produces TxK
-        # results in a matrix where mask[t,k] = (obs_indices[t] == k)
-        mask = obs_indices[:, None] == np.arange(self.alphabet_size)[None, :]
-        # reshape gamma to (T, N, 1) and mask to (T, 1, K)
-        # multiplying gives us shape (T, N, K)
-        # this uses the mask from before to only count where obs_indices[t] == k
-        # we have to transpose so that the time axis aligns properly
-        # note we need to add a 3rd axis here because mask is (TxK) and gamma.T is (T, N) - we need all combos
-        bi_num = (gamma.T[:, :, None] * mask[:, None, :]).sum(axis=0)
-        bi_denom = np.sum(gamma, axis=1)
-        # reshape the denominator to be a column vector so it can be broadcast across rows
-        bi = bi_num / bi_denom[:, None]
+        iterations = 0
+        convergence = 0.0001
+        converged = False
+        prev_vals = None
+        curr_vals = None
+        while iterations <= 1000 and not converged:
+
+            # We will currently assume that the parameters are initialized when the model is called
+            _, fwd = self.forward(observation)
+            _, bwd = self.backward(observation)
+            obs_indices = np.array([self.sym_idx[symbol] for symbol in observation])
+            gamma = self.forward_backward(fwd, bwd)
+            T = len(observation)
+            # the full xi is a 3D array, since we are looking at state i and j across all t (3 dimensions)
+            # aij* = sum(t=0:T-2) xi(t)(i,j) / sum(t=0:T-2)(gamma(t)(i))
+            xi = np.zeros((T-1, len(self.states), len(self.states)))
+            # we use some broadcasting tricks to vectorize the operation, but we still need to loop over each t
+            # xi(t) needs to end up as an NxN matrix (the full xi will then be T-1xNxN)
+            # fwd[:, t][:, None] = (N, 1); trans_probs = (N, N); emit_probs[t+1][None, :] = (1, N); bwd[:, t+1][None, :] = (1, N)
+            # we will end up yielding an NxN matrix for all T-1
+            for t in range(T-1):
+                xi_num = self.mul(fwd[:, t][:, None], self.trans_probs, self.emit_probs[:, obs_indices[t+1]][None, :], bwd[:, t+1][None, :])
+                if self.use_log_space:
+                    xi_denom = np.logaddexp.reduce(xi_num.ravel())
+                else:
+                    xi_denom = xi_num.sum()
+                xi[t] = self.div(xi_num, xi_denom)
+            pi = gamma[:, 0]
+            aij_num = self.agg(xi, axis=0) # (N, N)
+            # transition matrix explicitly excludes the last entry (since you can't transition from the last thing to nothing)
+            aij_denom = self.agg(gamma[:, :-1], axis=1) # (N, )
+            aij = self.div(aij_num, aij_denom[:, None])
+            # bi(vk) = sum(t=1:T) gamma(i)(t) s.t. yt=vk / gamma(i)(t)
+            # since we need to find where yt=vk, we can vectorize this with a boolean mask
+            # below creates a np array called "mask", consisting of booleans of shape TxK due to broadcasting`
+            # note we reshaped obs_indices to be (T,1) and the alphabet vector to be (1,K) which produces TxK
+            # results in a matrix where mask[t,k] = (obs_indices[t] == k)
+            mask = obs_indices[:, None] == np.arange(self.alphabet_size)[None, :]
+            # reshape gamma to (T, N, 1) and mask to (T, 1, K)
+            # multiplying gives us shape (T, N, K)
+            # this uses the mask from before to only count where obs_indices[t] == k
+            # we have to transpose so that the time axis aligns properly
+            # note we need to add a 3rd axis here because mask is (TxK) and gamma.T is (T, N) - we need all combos
+            bi_num = self.agg(gamma.T[:, :, None] * mask[:, None, :], axis=0)
+            bi_denom = self.agg(gamma, axis=1)
+            # reshape the denominator to be a column vector so it can be broadcast across rows
+            bi = self.div(bi_num, bi_denom[:, None])
+
+            iterations += 1
+
+            if iterations % 2 == 0 and iterations > 0:
+                self.check_convergence(converged, convergence, pi, aij, bi)
+
+            self.update_probs(pi, aij, bi)
+
+
         return pi, aij, bi
 
     @classmethod
