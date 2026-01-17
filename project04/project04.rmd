@@ -1,0 +1,404 @@
+---
+title: "Project 04"
+author: "Your Name"
+date: "`r format(Sys.time(), '%Y%m%d')`"
+output:
+  github_document:
+    html_preview: false
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+library('reticulate')
+reticulate::use_condaenv(condaenv = "r-reticulate")
+
+```
+
+You will be implementing one of the primary assembly algorithms from short-read data that is used today. We will implement a simple form of the algorithm where we _assume perfect sequencing_. That is, everything is sequenced exactly once and there are no errors or variants in the sequencing. 
+
+A graph is composed of **nodes** and **edges** and we will need to develop a data strcture to track edges between nodes in our graph. We have provided the basic class structure as well as descriptions of functions to `add_edge` and `remove_edge` from the graph. You will need to implement these functions in order to then build the de Bruijn graph. 
+
+In our implementation below, we use a `defaultdict` data structure to hold a list of all edges in the graph where all "right" nodes connected to a "left" node are stored in a list for that node.
+
+```
+build_debruijn_graph:
+define substring length k and input string
+For each k-length substring of input:
+  split k mer into left and right k-1 mer
+  add k-1 mers as nodes with a directed edge from left k-1 mer to right k-1 mer
+```
+
+---
+## Eulerian walk
+
+To continue our implementation from last class, we will use our De Bruijn graph to output a valid sequence from the assembly. This is implemented as a recursive algorithm by considering all valid edges. You will notice that as you change $k$, we are able to better recapitulate our sequence depending on how repetitive it is. In a more complex implementation of a Eulerian walk there are heuristics and defined rules for determining the validity of traversing a specific edge in the graph to result in a full graph-traversal. One of these methods is to traverse the graph in a depth first manner to avoid sectioning off any part of the graph in the traversal. In our implementation we will ignore these for simplicity.
+
+```
+eulerian_walk:
+Beginning at first_node as node
+
+For node:
+    follow a random valid edge from node
+    remove edge
+    recurse
+```
+
+```{python}
+---
+title: "Project 04"
+author: "Your Name"
+date: "`r format(Sys.time(), '%Y%m%d')`"
+output:
+  github_document:
+    html_preview: false
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+library('reticulate')
+reticulate::use_condaenv(condaenv = "r-reticulate")
+```
+
+You will be implementing one of the primary assembly algorithms from short-read data that is used today. We will implement a simple form of the algorithm where we _assume perfect sequencing_. That is, everything is sequenced exactly once and there are no errors or variants in the sequencing. 
+
+A graph is composed of **nodes** and **edges** and we will need to develop a data strcture to track edges between nodes in our graph. We have provided the basic class structure as well as descriptions of functions to `add_edge` and `remove_edge` from the graph. You will need to implement these functions in order to then build the de Bruijn graph. 
+
+In our implementation below, we use a `defaultdict` data structure to hold a list of all edges in the graph where all "right" nodes connected to a "left" node are stored in a list for that node.
+
+```
+build_debruijn_graph:
+define substring length k and input string
+For each k-length substring of input:
+  split k mer into left and right k-1 mer
+  add k-1 mers as nodes with a directed edge from left k-1 mer to right k-1 mer
+```
+
+---
+## Eulerian walk
+
+To continue our implementation from last class, we will use our De Bruijn graph to output a valid sequence from the assembly. This is implemented as a recursive algorithm by considering all valid edges. You will notice that as you change $k$, we are able to better recapitulate our sequence depending on how repetitive it is. In a more complex implementation of a Eulerian walk there are heuristics and defined rules for determining the validity of traversing a specific edge in the graph to result in a full graph-traversal. One of these methods is to traverse the graph in a depth first manner to avoid sectioning off any part of the graph in the traversal. In our implementation we will ignore these for simplicity.
+
+```
+eulerian_walk:
+Beginning at first_node as node
+
+For node:
+    follow a random valid edge from node
+    remove edge
+    recurse
+```
+
+```{python}
+from collections import defaultdict, Counter
+import random
+from functools import cached_property
+
+
+class DeBruijnGraph:
+    """Main class for De Bruijn graphs
+
+    Private Attributes:
+        graph (defaultdict of lists): Edges for De Bruijn graph
+        first_node (str): starting position for traversing the graph
+    """
+
+    def __init__(self, input_string, k):
+        # self.graph = defaultdict(Counter)
+        self.graph = defaultdict(list)
+        self.first_node = ""
+        self.build_debruijn_graph(input_string, k)
+
+    def __repr__(self):
+        edges = []
+        for left, counter in self.graph.items():
+            edges.append(f"{left} -> {dict(counter)}")
+        edges_str = "\n  ".join(edges)
+        return f"<DeBruijnGraph: {len(self.graph)} nodes>\n  {edges_str}"
+
+    def _delete_cache(self):
+        """
+        Some properties of the class are cached with the cached_property decorator.
+        Since we can add and remove edges from our graph, cached results will
+        no longer be valid if we mutated the graph and need to be recomputed.
+        functools cached_property stores these in __dict__ so we need to manually
+        delete them.
+        """
+        for cache in ["in_and_out_degrees", "has_eulerian_circuit", "has_eulerian_path"]
+            if cache in self.__dict__:
+                del self.__dict__[cache]
+
+    @property
+    def num_nodes(self):
+        return len(self.graph)
+    
+    @property
+    def num_edges(self):
+        return sum(c.values() for c in self.graph.values())
+
+    @property
+    def has_eulerian_circuit(self) -> bool:
+        """Check if the graph has a valid Eulerian circuit by
+        seeing if all in-degree == out-degree for all nodes
+
+        Returns:
+            bool: True if an Eulerian circuit exists for the graph,
+            else False
+        """
+        out_degrees, in_degrees = self.in_and_out_degrees
+        if all(i == j for i, j in zip(out_degrees.values(), in_degrees.values())):
+            return True
+        return False
+
+    @property
+    def has_eulerian_path(self) -> bool:
+        """Finds if the graph has an Eulerian path.
+        If an Eulerian circuit exists, this will return True.
+        Finds if there is only 1 node for which out_degree - in_degree = 1
+        and only 1 node for in_degree - out_degree = 1. 
+        Returns:
+            bool: True if an Eulerian path exists for the graph,
+            else False.
+        """
+        if self.has_eulerian_circuit:
+            return True
+        
+        out_degrees, in_degrees = self.in_and_out_degrees
+        start_node = None
+        end_node = None
+
+        for node in set(in_degrees) | set(out_degrees):
+            in_d = in_degrees.get(node, 0)
+            out_d = out_degrees.get(node, 0)
+            diff = out_d - in_d
+
+            # diff == 1 == start node; diff == -1 == end node
+            if diff not in (-1, 0, 1):
+                return False
+
+            # only 1 node can be 1 or -1 to be valid path
+            if diff == 1:
+                if start_node is not None:
+                    return False
+                start_node = node
+
+            elif diff == -1:
+                if end_node is not None:
+                    return False
+                end_node = node
+
+        # return the actual start + end nodes as well as True
+        if start_node and end_node:
+            return True, start_node, end_node
+        
+        return False
+
+    def calc_out_degree(self, node: Counter) -> int:
+        """Find the out degree for a particular node
+
+        Args:
+            node (Counter): Node to calculate its degree
+
+        Returns:
+            int: Out degree of specified node
+        """
+        return sum(self.graph[node].values())
+    
+    def calc_in_degree(self, node: Counter) -> int:
+        """Find the in-degree of a node from the graph
+
+        Args:
+            node (Counter): Node to calculate in-degree
+
+        Returns:
+            int: in-degree of the node
+        """
+        in_degree = 0
+        for _, right in self.graph.items():
+            in_degree += right.get(node, 0)
+        return in_degree
+    
+    # cached property will store the return value after calculating it once
+    # just so that we don't need to recalculate if we check both circuit and path.
+
+    @cached_property
+    def in_and_out_degrees(self) -> tuple[dict[str, int], dict[str, int]]:
+        """Calculate the in and out degrees for all nodes in the graph
+
+        Returns:
+            tuple[dict[int], dict[int]]: Tuple of dictionaries as
+            (node: out_degree, node: in_degree)
+        """
+        out_degrees = {}
+        in_degrees = {}
+        for node in self.graph.keys():
+            out_degrees[node] = (self.calc_out_degree(node))
+            in_degrees[node] = (self.calc_in_degree(node))
+        
+        return out_degrees, in_degrees
+
+    def add_edge(self, left, right):
+        """This function adds a new edge to the graph
+
+        Args:
+            left (str): The k-1 mer for the left edge
+            right (str): The k-1 mer for the right edge
+
+        Updates graph attribute to add right to the list named left in defaultdict
+        """
+        
+        self.graph[left].append(right)
+        
+    def remove_edge(self, left, right):
+        """This function removes an edge from the graph
+
+        Args:
+            left (str): The k-1 mer for the left edge
+            right (str): The k-1 mer for the right edge
+
+        Updates graph attribute to remove right from the list named left in defaultdict
+        """
+        # Remove the edge
+        self.graph[left].remove(right)
+        
+        # If the start point has no outgoing edges,
+        # delete it.
+        if len(self.graph[left]) == 0:
+          del self.graph[left]
+
+    def build_debruijn_graph(self, input_string, k):
+        """This function builds a De Buijn graph from a string
+
+        Args:
+            input_string (str): string to use for building the graph
+            k (int): k-mer length for graph construction
+
+        Updates graph attribute to add all valid edges from the string
+
+        Example:
+        >>> dbg = DeBruijnGraph("this this this is a test", 4)
+        >>> print(dbg.graph) #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+        defaultdict(<class 'list'>, {'thi': ['his', 'his', 'his'], 'his': ['is ', 'is ', 'is '], ...)
+        """
+        for i in range(len(input_string) - k + 1):
+            left = input_string[i : i + k - 1]
+            right = input_string[i + 1 : i + k]
+            self.add_edge(left, right)
+
+    def print_eulerian_walk(self, seed=None):
+        """This function starts the recursive walk function
+        at the first node in the graph
+
+        Args: None
+
+        Returns:
+            tour (list): list of k-1 mers traversed by the algorithm
+
+        Example:
+        >>> dbg = DeBruijnGraph("this this this is a test", 4)
+        >>> dbg.print_eulerian_walk(seed=1) #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+        ['thi', ...]
+        """
+        for node in list(self.graph.keys()):
+          
+          # Save an unmodified copy of our graph.
+          untraversed = self.graph.copy()
+          
+          # Attempt to trace an eulerian path from node
+          #   removing traversed edges from self.graph as we go.
+          walk = self.eulerian_walk(node = node, tour = [])
+          
+          # Restore the modified graph
+          self.graph = untraversed.copy()
+          
+          # If we found an eulerian path, break out and return it
+          if walk:
+            return walk
+        
+        # If no Eulerian path was found, return False
+        return False
+
+    def eulerian_walk(self, node, tour, seed=None):
+        """This is a recursive function that follows all edges from a node
+        to traverse the graph
+
+        Args:
+            node (str): current node to traverse from
+            seed (int): seed for random selection of edge to follow
+
+        Returns:
+            tour (list): list of k-1 mers traversed so far by the algorithm
+            Note: this will be reverse order because of recursion
+
+        Example:
+        >>> dbg = DeBruijnGraph("this this this is a test", 4)
+        >>> dbg.eulerian_walk('thi', seed=1) #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+        ['est', ...]
+        """
+        
+        # Mark the current node as visited.
+        tour.append(node)
+        
+        # If we have outgoing edges, pick a random edge to traverse.
+        if node in self.graph.keys():
+          new_node = random.choice(self.graph[node])
+          
+          # Remove the edge from graph
+          self.remove_edge(node, new_node)
+          
+          # Recurse to consider the next connected edge.
+          return self.eulerian_walk(new_node, tour)
+        
+        # If we have no outgoing edges, check if the tour is complete.
+        else:
+          # All edges have been covered; return the path
+          if len(self.graph.keys()) == 0:
+            return tour
+          
+          # Otherwise, we've hit a dead end; return false.
+          else:
+            return False
+```
+
+
+```{python}
+# Test 1
+dbg = DeBruijnGraph("this this this is a test", 4)
+dbg_walk = dbg.print_eulerian_walk()
+print(dbg_walk)
+
+```
+
+```{python}
+# | eval: false
+graph = DeBruijnGraph("fool me once shame on shame on you fool me", 6)
+walk = graph.print_eulerian_walk(seed=4)
+walk[0] + "".join(map(lambda x: x[-1], walk[1:]))
+print(walk)
+
+```
+
+Expected output:
+```python-traceback
+defaultdict(<class 'list'>, {'fool ': ['ool m', 'ool m'], 'ool m': ['ol me', 'ol me'], 'ol me': ['l me '], 'l me ': [' me o'], ' me o': ['me on'], 'me on': ['e onc', 'e on ', 'e on '], 'e onc': [' once'], ' once': ['once '], 'once ': ['nce s'], 'nce s': ['ce sh'], 'ce sh': ['e sha'], 'e sha': [' sham'], ' sham': ['shame', 'shame'], 'shame': ['hame ', 'hame '], 'hame ': ['ame o', 'ame o'], 'ame o': ['me on', 'me on'], 'e on ': [' on s', ' on y'], ' on s': ['on sh'], 'on sh': ['n sha'], 'n sha': [' sham'], ' on y': ['on yo'], 'on yo': ['n you'], 'n you': [' you '], ' you ': ['you f'], 'you f': ['ou fo'], 'ou fo': ['u foo'], 'u foo': [' fool'], ' fool': ['fool ']})
+'fool me once shame on shame on you fool me'
+```
+
+```
+
+```{python}
+# | eval: false
+graph = DeBruijnGraph("fool me once shame on shame on you fool me", 6)
+print(graph.graph)
+walk = graph.print_eulerian_walk(seed=4)
+walk[0] + "".join(map(lambda x: x[-1], walk[1:]))
+```
+
+Expected output:
+```python-traceback
+defaultdict(<class 'list'>, {'fool ': ['ool m', 'ool m'], 'ool m': ['ol me', 'ol me'], 'ol me': ['l me '], 'l me ': [' me o'], ' me o': ['me on'], 'me on': ['e onc', 'e on ', 'e on '], 'e onc': [' once'], ' once': ['once '], 'once ': ['nce s'], 'nce s': ['ce sh'], 'ce sh': ['e sha'], 'e sha': [' sham'], ' sham': ['shame', 'shame'], 'shame': ['hame ', 'hame '], 'hame ': ['ame o', 'ame o'], 'ame o': ['me on', 'me on'], 'e on ': [' on s', ' on y'], ' on s': ['on sh'], 'on sh': ['n sha'], 'n sha': [' sham'], ' on y': ['on yo'], 'on yo': ['n you'], 'n you': [' you '], ' you ': ['you f'], 'you f': ['ou fo'], 'ou fo': ['u foo'], 'u foo': [' fool'], ' fool': ['fool ']})
+'fool me once shame on shame on you fool me'
+```
