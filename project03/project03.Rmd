@@ -1,0 +1,244 @@
+---
+title: "Project 03"
+author: "Michael Bambha, Abigail McKinley, Little Butler"
+date: "`r format(Sys.time(), '%Y%m%d')`"
+output:
+  github_document:
+    html_preview: false
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+library('reticulate')
+```
+
+---
+
+# Gibbs sampling
+
+---
+## Imports
+
+For this project, it tasks you with creating a sequence logo to plot the motif sequences identified through your algorithm.
+This is a very minor portion of the project and is best used for checking your work. That means that if you cannot get the library
+that you are about to install to work, don't worry. At a bare minimum, you only need `numpy` to complete this project.
+
+```{r, install_seqlogo}
+reticulate::conda_install(packages=c('pdf2svg',"seqlogo"), forge=TRUE, channel="bioconda",conda="auto", additional_install_args="--solver=libmamba")
+```
+
+
+```{python}
+from collections import deque
+import numpy as np
+from data_readers import *
+from seq_ops import get_seq
+from motif_ops import *
+
+#import logomaker
+#import pandas as pd
+#import matplotlib.pyplot as plt
+```
+
+---
+## Implement Gibbs Sampler
+
+
+Gibbs sampling is a MCMC approach to identify enrichments. Here we will implement a method to identify motifs from a set of regions. 
+
+Important considerations:
+- We will need to score each sequence with a PWM using the `score_kmer()` or `score_sequence()` functions
+    - You will need to investigate into the help documenation and libraries to identify how best to use these functions. 
+- These sites are often not strand-specific and so both scores on the negative as well as positive strand should be considered
+- To select a random sequence, use `random.randint()` or `numpy.random.randint()`
+- To select a new position $m$ (as defined below) use `random.choices()` or `numpy.random.choice()`  
+
+Assumptions: 
+- We know $k$ as the length of expected motif
+- Each sequence contains the motif
+
+
+```
+GibbsMotifFinder(DNA, k-length)
+    random pick of k-length sequences from each line of DNA as Motifs
+    for j ← 1 to 10000 or Motifs stops changing
+        i ← Random(N) where N is number of DNA entries
+        PWM ← PWM constructed from all Motifs except for Motifi
+        Motifi ← select position m from PWM-scored k-mers in DNAi in probabilistic fashion from score distribution
+    return PFM
+```
+
+Probability of chosing position $m = \frac{A_{m}}{\sum_{l}A_{l}}$ for positions $l$ in DNAi
+
+
+**Note:** I have also added a function to `motif_ops.py` that will calculate the information content of your motifs. This is useful to observe the progression of your Gibbs sampler as well as a measure of convergence. You can use this function as `IC = pfm_ic(pfm)`. You should expect a slow increase of IC until it plateaus such as in the plot below from your lecture slides:
+
+![]('figures/Gibbs_Sampling.png')
+
+
+```{python}
+def score_kmers(seq: str, pwm: np.ndarray, k: int) -> np.ndarray:
+    """Use score_kmer in a sliding window to compute the scores
+    for every valid kmer based on a given pwm and k.
+
+    Args:
+        seq (str): sequence to score
+        pwm (np.ndarray): position weight matrix of motif
+        k (int): k-length of kmer to score
+
+    Returns:
+        np.ndarray: Array of PWM scores based on kmer start position within
+        the sequence
+    """
+    scores = []
+    for i in range(len(seq) - k):
+        score = score_kmer(seq[i : i + k], pwm)
+        scores.append(score)
+    return np.array(scores)
+
+
+def score_to_prob(scores: np.ndarray) -> np.ndarray:
+    """Convert numpy array of PWM scores to
+    an array of probabilities
+
+    Args:
+        scores (np.ndarray): Array of size 4xk with PWM
+        scores of each kmer
+
+    Returns:
+        np.ndarray: Array of size 4xk with probabilities
+    """
+    probs = np.exp2(scores)
+    probs /= probs.sum()
+    return probs
+
+
+def build_ppm(pfm: np.ndarray) -> np.ndarray:
+    """
+    Build a Position Probability Matrix (PWM) from a Position Frequency Matrix (PFM).
+    Made for convergence check using KL divergence
+
+    Args:
+        pfm (np.ndarray): PFM with dimensions 4 x length.
+
+    Returns:
+        np.ndarray: PPM with dimensions 4 x length.
+    """
+    p = 0.25
+    sums = np.sum(pfm, axis=0) + 4 * p
+    ppm = (pfm + p) / sums
+    return ppm
+
+
+def calc_kl_div(ppm_prev: np.ndarray, ppm_curr: np.ndarray) -> float:
+    """Calculate the Kullback-Leibler Divergence between
+    two PPMs
+
+    Args:
+        ppm_prev (np.ndarray): PPM from past iteration
+        ppm_curr (np.ndarray): PPM of current iteration
+
+    Returns:
+        float: KL divergence
+    """
+    ratio = np.sum(ppm_curr * np.log2(ppm_curr / ppm_prev), axis=0)
+    return np.mean(ratio)
+
+
+def check_convergence(
+    kl_div: deque, burn_in: int, tolerance: float, iteration: int
+) -> bool:
+    """Finds if all values in a KL divergence deque are less than a specified tolerance value.
+    Returns True if all values in kl_div < tolerance; False if any kl_div[i] > tolerance,
+    current iteration < burn-in, or len(kl_div) < kl_div.maxlen
+
+    Args:
+        kl_div (deque): Deque of previous n KL divergences
+        burn_in (int): Number of iterations before allowing check
+        tolerance (float): Tolerance for KL divergence
+        iteration (int): Number of current iteration
+
+    Returns:
+        bool: Returns True if all values in kl_div < tolerance; False if any kl_div[i] > tolerance,
+    current iteration < burn-in, or len(kl_div) < kl_div.maxlen
+    """
+    if iteration < burn_in or len(kl_div) < kl_div.maxlen:
+        return False
+    return all(val < tolerance for val in kl_div)
+
+
+def GibbsMotifFinder(seqs: list[str], k: int, seed: int = 42) -> np.ndarray:
+    """
+    Function to find a pfm from a list of strings using a Gibbs sampler
+
+    Args:
+        seqs (str list): a list of sequences, not necessarily in same lengths
+        k (int): the length of motif to find
+        seed (int, default=42): seed for np.random
+
+    Returns:
+        pfm (numpy array): dimensions are 4xlength
+
+    """
+    np.random.seed(seed)
+    n = len(seqs)
+    kmer_starts = np.random.randint(0, len(seqs[0]) - k, size=n)
+    init_motif = [seq[start : start + k] for seq, start in zip(seqs, kmer_starts)]
+    motifs = None
+    kl_div = deque(maxlen=11)
+    ppm_prev = None
+    for i in range(10000):
+        if not motifs:
+            motifs = init_motif
+        excluded_idx = np.random.randint(0, n)
+        motifs_minus_excluded = motifs[:excluded_idx] + motifs[excluded_idx + 1 :]
+        pfm = build_pfm(motifs_minus_excluded, k)
+        ppm = build_ppm(pfm)
+        if ppm_prev is not None:
+            kl = calc_kl_div(ppm_prev, ppm)
+            kl_div.append(kl)
+        ppm_prev = ppm.copy()
+        if check_convergence(kl_div, burn_in=2000, tolerance=1e-6, iteration=i) is True:
+            break
+        pwm = build_pwm(pfm)
+        score_distribution = score_kmers(seqs[excluded_idx], pwm, k)
+        probs = score_to_prob(score_distribution)
+        choice = np.random.choice(len(probs), p=probs)
+        motifs[excluded_idx] = seqs[excluded_idx][choice : choice + k]
+
+    return pfm
+```
+
+```{python}
+seq_file = "data/GCF_000009045.1_ASM904v1_genomic.fna"
+gff_file = "data/GCF_000009045.1_ASM904v1_genomic.gff"
+
+promotor_seqs = []
+
+for name, seq in get_fasta(seq_file):  # For each entry in our FASTA file
+    for gff_entry in get_gff(gff_file):  # For each entry in our GFF file
+        if gff_entry.type == "CDS":  # If this is a coding sequence
+            promoter_seq = get_seq(
+                seq, gff_entry.start, gff_entry.end, gff_entry.strand, 50
+            )  # Extract 50 bp as a promoter
+
+            """
+            Because the gibbs sampling assumption is broken in just using promoters,
+            and because it takes very long time to randomly progress through so many
+            regions, for this example we will pre-filter for sequences that all contain
+            part of the shine-dalgarno motif:
+            """
+            if "AGGAGG" in promoter_seq:
+                promotor_seqs.append(promoter_seq)
+
+promoter_pfm = GibbsMotifFinder(promotor_seqs, 10)
+# pfm = pd.DataFrame(promoter_pfm.T, columns=["A", "C", "G", "T"])
+print(pfm)
+# was having issues w/ seqlogo dependencies so was checking w/ logomaker
+# logomaker uses matplotlib and needs a pandas dataframe
+# logomaker.Logo(pfm, color_scheme="classic") 
+# plt.show()
+# seqlogo.seqlogo(seqlogo.CompletePm(pfm=promoter_pfm.T))
+```
