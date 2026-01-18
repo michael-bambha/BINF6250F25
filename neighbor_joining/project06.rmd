@@ -1,0 +1,322 @@
+---
+title: "Project 06: Hierarchical Clustering"
+author: "Michael Bambha"
+date: "`r format(Sys.time(), '%Y%m%d')`"
+output:
+  github_document:
+    html_preview: false
+    toc: true
+    toc_depth: 2
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+library('reticulate')
+reticulate::conda_install(envname = "r-reticulate",
+                        packages=c("biopython", "matplotlib"),
+                        channel=c("bioconda", "conda-forge"), 
+                        conda="auto")
+```
+
+## Imports
+
+```{python}
+from typing import List, Tuple, Dict
+import numpy as np
+from Bio import Phylo
+import matplotlib.pyplot as plt
+import io
+from my_read_fasta import read_fasta
+from smith_waterman import smith_waterman, smith_waterman_max_score, kimura_two_parameter, jukes_cantor, calculate_p_distance, DISTANCE_FUNCTIONS
+```
+
+## Class definition
+
+```{python}
+class Node:
+  def __init__(self, name):
+    self.name = name
+    self.edges = []
+    
+  def __repr__(self):
+    """Defines how our object is printed out"""
+    edge_info = ", ".join([f"{node.name}:{dist:.4f}" for node, dist in self.edges])
+    return f"Node('{self.name}', edges=[{edge_info}])"
+
+  def add_edge(self, node, distance):
+    """Add an edge to a node in the form of a tuple (node, distance)"""
+    self.edges.append((node, distance))
+    node.edges.append((self, distance))
+
+  def is_leaf(self):
+    """Node is a leaf if the length of its edges == 1"""
+    return len(self.edges) == 1
+
+  def to_newick(self, parent=None):
+    """Recursively build our newick string from class implementation"""
+    if self.is_leaf():
+      dist = next((d for n, d in self.edges if n == parent), 0)
+      return f"{self.name}:{dist:.4f}"
+       
+    children = [(node, dist) for node, dist in self.edges if node != parent]
+    child_strings = [node.to_newick(parent=self) for node, dist in children]
+       
+    newick = "(" + ",".join(child_strings) + ")"
+       
+    if parent is not None:
+      parent_dist = next((d for n, d in self.edges if n == parent), 0)
+      newick += f":{parent_dist:.4f}"
+       
+    return newick
+```
+
+```{python DistanceMatrix}
+def build_similarity_matrix(sequences: Dict[str, str]) -> np.ndarray:
+    """Builds distance matrix using Smith-Waterman scores.
+
+    Args:
+        sequences (Dict[str, str]): Dictionary of HIV RT sequences
+
+    Returns:
+        np.ndarray: Similarity matrix from SW max scores
+
+    """
+    n_seq = len(sequences)
+    seqs = list(sequences.values())
+    sm = np.zeros((n_seq, n_seq))
+    for i in range(n_seq):
+        for j in range(i, n_seq):
+            sm[i, j] = smith_waterman_max_score(seqs[i], seqs[j])
+            sm [j, i] = sm[i, j]
+    return sm
+
+def normalize_similarity_matrix(similarity_matrix: np.ndarray) -> np.ndarray:
+    """Normalize Smith-Waterman scores using a cosine-similarity approach -
+    divide scores by the square root of the maximum possible alignment score.
+    This is because with variable length sequences, longer sequences are biased
+    as they are more likely to have higher raw scores, even if alignment is
+    poorer.
+
+    Args:
+        similarity_matrix (np.ndarray): Matrix of raw Smith-Waterman scores
+
+    Returns:
+        np.ndarray: Matrix of normalized Smith-Waterman scores based on
+        square root of maximum possible score.
+    """
+    diag = np.diag(similarity_matrix)
+    normalization = np.sqrt(np.outer(diag, diag))
+    return similarity_matrix / normalization 
+    
+
+def build_distance_matrix(sequences: Dict[str, str], metric="cosine") -> Tuple[np.ndarray, List[str]]:
+  """Builds distance matrix using Smith-Waterman scores.
+
+    Args:
+        sequences (Dict[str, str]): Dictionary of HIV RT sequences
+
+    Returns:
+        Tuple[np.ndarray, List[str]]: Distance matrix and list of sequence IDs
+  """
+  metric = metric.lower()
+  n_seq = len(sequences)
+  sequence_ids = list(sequences.keys())
+
+  if metric == "cosine":
+    similarity_matrix = build_similarity_matrix(sequences)
+    normalized_sm = normalize_similarity_matrix(similarity_matrix)
+    return (1 - normalized_sm), sequence_ids
+    
+  distance_func = DISTANCE_FUNCTIONS[metric]
+  distance_matrix = np.zeros((n_seq, n_seq))
+  seqs_list = list(sequences.values())
+
+  for i in range(n_seq):
+    for j in range(i+1, n_seq):
+      aligned_i, aligned_j, _ = smith_waterman(seqs_list[i], seqs_list[j])
+      dist = distance_func(aligned_i, aligned_j)
+      distance_matrix[i, j] = dist
+      distance_matrix[j, i] = dist
+            
+    return distance_matrix, sequence_ids
+```
+
+```{python q_matrix}
+def build_q_matrix(distance_matrix: np.ndarray) -> np.ndarray:
+    """Build a q-matrix from distance matrix.
+
+    Args:
+        distance_matrix (np.ndarray): Normalized distance matrix
+
+    Returns:
+        np.ndarray: Q-matrix from normalized distance scores
+    """
+    n_taxa = distance_matrix.shape[0]
+    # because dm is symmetric, r_i = r_j
+    r_i = np.sum(distance_matrix, axis=1)
+    # np.sum returns a vector of shape (n_taxa,)
+    # to broadcast, we need to reshape to (1, n) and (n, 1)
+    qm = (n_taxa - 2) * distance_matrix - r_i[:, None] - r_i[None, :]
+    np.fill_diagonal(qm, np.inf) # diagonal is meaningless algorithmically -- we can fill with inf for our later min_distance
+    return qm
+```
+
+```{python}
+def get_min_distance(matrix):
+    ''' Function to find the smallest value off-diagonal in the distance
+    matrix provided. This is used in the UPGMA algorithm.
+
+    Since we fill the diagonal in the q-matrix with np.inf, we will
+    assume that we don't need to explicitly handle ignoring the diagonal.
+    
+    Args: 
+        matrix (2D numpy array): a distance matrix
+
+    Returns:
+        min (float): The smallest distance in the matrix
+        pos (tuple): The x and y position of the smallest distance
+    
+    '''
+    min_val = np.min(matrix)
+    pos = np.unravel_index((np.argmin(matrix)), shape=matrix.shape)
+    return min_val, pos
+```
+
+```{python}
+def calculate_branch_lengths(distance_matrix: np.ndarray, i: int, j: int) -> Tuple[float, float]:
+    """Calculate the branch lengths for a given distance
+    matrix and i, j
+
+    Args:
+        distance_matrix (np.ndarray): Matrix of normalized distances
+        i (int): index corresponding to species i
+        j (int): index corresponding to species j
+
+    Returns:
+        Tuple[float, float]: Branch lengths of i and j, respectively.
+    """
+    n_taxa = distance_matrix.shape[0]
+    r_i = np.sum(distance_matrix[i, :])
+    r_j = np.sum(distance_matrix[j, :])
+    d_ij = distance_matrix[i, j]
+    
+    L_i = 0.5 * d_ij + (r_i - r_j) / (2 * (n_taxa - 2))
+    L_j = d_ij - L_i
+    
+    epsilon = 1e-6
+    L_i = max(epsilon, L_i)
+    L_j = max(epsilon, L_j)
+
+    return round(L_i, 6), round(L_j, 6)
+```
+
+```{python}
+def calculate_k_distances(distance_matrix: np.ndarray, i: int, j: int) -> np.ndarray:
+    """Find the distances of all other nodes to a newly merged node k=(i,j).
+
+    Args:
+        distance_matrix (np.ndarray): Distance matrix
+        i (int): index corresponding to species i
+        j (int): index corresponding to species j
+
+    Returns:
+        np.ndarray: np array of size 1xn-1, where n is the # of rows
+        or columns of the square distance matrix as input.
+    """
+    mask = np.ones(distance_matrix.shape[0], dtype=bool)
+    mask[[i, j]] = False
+    new_distances = 0.5 * (distance_matrix[i, mask] + distance_matrix[j, mask] - distance_matrix[i, j])
+    return np.round(new_distances, 6)
+```
+
+```{python}
+def update_distance_matrix(distance_matrix: np.ndarray, i: int, j: int) -> np.ndarray:
+    """Update a distance matrix to remove row/columns i, j and include a new node k.
+    Update all of the distances to this new node k. 
+
+    Args:
+        distance_matrix (np.ndarray): Distance matrix to update
+        i (int): index corresponding to species i
+        j (int): index corresponding to species j 
+
+    Returns:
+        np.ndarray: Updated distance matrix with k
+    """
+    new_distances = calculate_k_distances(distance_matrix, i, j)
+    distance_matrix = np.delete(distance_matrix, [i, j], axis=1)
+    distance_matrix = np.delete(distance_matrix, [i, j], axis=0)
+    distance_matrix = np.vstack((distance_matrix, new_distances))
+    # since our temporary array is n+1, we can append 0, which is the diagonal.
+    # hstack needs a reshaped array, else it interprets (n+1,) as (1,n+1).
+    # below we reshape to a proper column vector so we can stack it
+    distance_matrix = np.hstack((distance_matrix, 
+                                 np.append(new_distances, 0)[:, None]))
+    return distance_matrix
+```
+
+```{python}
+def neighbor_joining(distance_matrix: np.ndarray, labels: List[str]):
+
+  n_taxa = distance_matrix.shape[0]
+  nodes = [Node(name=label) for label in labels]
+  while n_taxa > 2:
+    q_matrix = build_q_matrix(distance_matrix)
+    min_distance, (i, j) = get_min_distance(q_matrix)
+    L_i, L_j = calculate_branch_lengths(distance_matrix, i, j)
+    k = Node(name=f"node_{len(labels) - n_taxa + 1}")
+    k.add_edge(nodes[i], L_i)
+    k.add_edge(nodes[j], L_j)
+    nodes.pop(max(i, j))  # we pop max first to avoid index shifting issues
+    nodes.pop(min(i, j))
+    nodes.append(k)
+    distance_matrix = update_distance_matrix(distance_matrix, i, j)
+    n_taxa -= 1
+
+  if len(nodes) == 2:
+    final_distance = distance_matrix[0, 1]
+    nodes[0].add_edge(nodes[1], final_distance)
+    
+  root = nodes[0] # this isn't really a 'root' but we need somewhere to start w/ newick
+  newick_string = root.to_newick() + ";"
+  return newick_string   
+
+```
+
+```{python}
+# From a file
+def plot_tree(newick_tree: str) -> None:
+# Parse the Newick string
+  print(f"in plot_tree() {newick_tree}")
+  
+  tree = Phylo.read(io.StringIO(newick_tree),"newick") # Using io.StringIO for string input
+
+# Display the tree as ASCII art
+  Phylo.draw_ascii(tree)
+
+# Draw the tree
+  Phylo.draw(tree)
+
+# Show the plot
+  plt.show()
+
+```
+
+```{python}
+import numpy as np
+
+if __name__ == "__main__":
+    # Read HIV RT sequences
+  sequences = read_fasta("lafayette_SARS_RT.fasta")
+  
+  # Build distance matrix using Smith-Waterman
+  dist_matrix, seq_ids = build_distance_matrix(sequences)
+  
+  # Generate unrooted tree using Neighbor-Joining
+  tree = neighbor_joining(dist_matrix, seq_ids)
+  
+  print(tree)
+  # plot_tree(tree)
+  
+```
