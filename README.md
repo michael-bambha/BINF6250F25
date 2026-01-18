@@ -16,6 +16,6 @@ This repository contains several projects that I worked on over the course of ta
 
 * [Project 5: Dynamic Programming (Smith-Waterman)](./project05/README.md)
 
-* [Project 6: Tree Building Algorithms (Neighbor-Joining)](./project06/README.md)
+* [Project 6: Tree Building Algorithms (Neighbor-Joining)](./neighbor_joining/README.md)
 
 * [Project 8: Hidden Markov Models (Forward, Backward, Forward-Backward, Viterbi, Baum-Welch)](./project08/README.md)
